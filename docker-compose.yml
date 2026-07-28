@@ -1,0 +1,24 @@
+services:
+  procoder:
+    build: .
+    image: procoder:latest
+    container_name: procoder
+    ports:
+      - "3000:3000"
+    environment:
+      - PORT=3000
+      - CODEBUDDY_API_KEY=${CODEBUDDY_API_KEY}
+      - CODEBUDDY_INTERNET_ENVIRONMENT=external
+      # Agent 默认工作目录（对应下方挂载点）
+      - DEFAULT_CWD=/workspace/repos
+      - DEFAULT_PERMISSION_MODE=acceptEdits
+      - MAX_TURNS=20
+    volumes:
+      # 持久化会话/消息数据库
+      - procoder-data:/app/data
+      # 挂载需要被 Agent 读写的代码仓库（按需修改宿主机路径）
+      - ./repos:/workspace/repos:rw
+    restart: unless-stopped
+
+volumes:
+  procoder-data:
