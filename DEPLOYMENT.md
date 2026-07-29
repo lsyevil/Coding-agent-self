@@ -4,13 +4,17 @@ ProCoder 是一个**单进程**全栈应用：Express 后端同时托管构建�
 
 ---
 
-## 一、准备 CodeBuddy 凭证
+## 一、准备模型凭证（OpenAI 兼容）
 
-从 https://www.codebuddy.cn 获取 `CODEBUDDY_API_KEY`。三种登录方式任选其一：
+本应用使用**任意 OpenAI 兼容端点**，只需三个变量：
 
-1. **API Key（推荐服务器）**：设置 `CODEBUDDY_API_KEY`。
-2. **Auth Token**：设置 `CODEBUDDY_AUTH_TOKEN`。
-3. **CLI 登录**：在部署机上执行 `codebuddy login`，应用会自动复用其登录态（仅同机有效）。
+1. `OPENAI_API_KEY`：你的模型 API Key（必填）。
+2. `OPENAI_BASE_URL`：API 基址。OpenAI 官方留空；第三方/自建填其地址，例如：
+   - DeepSeek：`https://api.deepseek.com/v1`
+   - OpenRouter：`https://openrouter.ai/api/v1`
+   - 本地 Ollama：`http://localhost:11434/v1`
+   - Azure OpenAI：`https://<resource>.openai.azure.com/openai`
+3. `OPENAI_MODEL`：默认模型名（必填，如 `gpt-4o`、`deepseek-chat`）。
 
 ---
 
@@ -22,7 +26,7 @@ npm install
 
 # 2. 配置环境变量
 cp .env.example .env
-# 编辑 .env，填入 CODEBUDDY_API_KEY，并设置 DEFAULT_CWD 指向代码仓库
+# 编辑 .env，填入 OPENAI_API_KEY、OPENAI_MODEL，并设置 DEFAULT_CWD 指向代码仓库
 
 # 3. 构建前端
 npm run build
@@ -45,7 +49,7 @@ npm start
 ## 三、方式 B：Docker（推荐）
 
 ```bash
-# 1. 准备 .env（至少包含 CODEBUDDY_API_KEY 与 DEFAULT_CWD）
+# 1. 准备 .env（至少包含 OPENAI_API_KEY、OPENAI_MODEL 与 DEFAULT_CWD）
 cp .env.example .env
 
 # 2. 构建并启动
@@ -62,7 +66,8 @@ docker compose up -d --build
 ```bash
 docker build -t procoder:latest .
 docker run -d --name procoder -p 3000:3000 \
-  -e CODEBUDDY_API_KEY=xxx \
+  -e OPENAI_API_KEY=xxx \
+  -e OPENAI_MODEL=gpt-4o \
   -e DEFAULT_CWD=/workspace/repos \
   -v procoder-data:/app/data \
   -v $(pwd)/repos:/workspace/repos:rw \
@@ -85,10 +90,10 @@ docker run -d --name procoder -p 3000:3000 \
 | 变量 | 说明 | 默认值 |
 |------|------|--------|
 | `PORT` | 服务端口 | `3000` |
-| `CODEBUDDY_API_KEY` | API Key | 无 |
-| `CODEBUDDY_AUTH_TOKEN` | Auth Token | 无 |
-| `CODEBUDDY_INTERNET_ENVIRONMENT` | `external` / `internal` | `external` |
-| `CODEBUDDY_BASE_URL` | 私有化网关地址 | 无 |
+| `OPENAI_API_KEY` | 模型 API Key（必填） | 无 |
+| `OPENAI_BASE_URL` | 兼容端点基址（OpenAI 官方留空） | 无 |
+| `OPENAI_MODEL` | 默认模型名（必填） | 无 |
+| `OPENAI_MODELS` | 可选模型下拉列表（逗号分隔） | 无 |
 | `DEFAULT_CWD` | 新建会话默认工作目录 | 进程启动目录 |
 | `DEFAULT_PERMISSION_MODE` | `default`/`acceptEdits`/`plan`/`bypassPermissions` | `default` |
 | `MAX_TURNS` | 单次请求最大工具轮数 | `10` |

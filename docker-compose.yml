@@ -7,8 +7,9 @@ services:
       - "3000:3000"
     environment:
       - PORT=3000
-      - CODEBUDDY_API_KEY=${CODEBUDDY_API_KEY}
-      - CODEBUDDY_INTERNET_ENVIRONMENT=external
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - OPENAI_BASE_URL=${OPENAI_BASE_URL}
+      - OPENAI_MODEL=${OPENAI_MODEL}
       # Agent 默认工作目录（对应下方挂载点）
       - DEFAULT_CWD=/workspace/repos
       - DEFAULT_PERMISSION_MODE=acceptEdits

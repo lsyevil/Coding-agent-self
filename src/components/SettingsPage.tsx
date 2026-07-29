@@ -43,9 +43,8 @@ interface LoginStatus {
   apiKey?: string;
   envVars?: {
     apiKey?: string;
-    authToken?: string;
-    internetEnv?: string;
     baseUrl?: string;
+    model?: string;
   };
 }
 
@@ -128,9 +127,8 @@ export function SettingsPage({
   const [showEnvConfig, setShowEnvConfig] = useState(false);
   const [envConfig, setEnvConfig] = useState({
     apiKey: '',
-    authToken: '',
-    internetEnv: '' as '' | 'internal' | 'iOA',
     baseUrl: '',
+    model: '',
   });
   const [savingEnv, setSavingEnv] = useState(false);
 
@@ -164,12 +162,12 @@ export function SettingsPage({
   // 保存环境变量配置
   const saveEnvConfig = async () => {
     // 至少需要配置一个有效的值
-    const hasAnyConfig = envConfig.apiKey.trim() || envConfig.authToken.trim();
+    const hasAnyConfig = envConfig.apiKey.trim() || envConfig.model.trim() || envConfig.baseUrl.trim();
     if (!hasAnyConfig) {
-      MessagePlugin.warning('请至少配置 API Key 或 Auth Token');
+      MessagePlugin.warning('请至少配置 API Key / Model / BaseURL 之一');
       return;
     }
-    
+
     setSavingEnv(true);
     try {
       const response = await fetch('/api/save-env-config', {
@@ -177,18 +175,17 @@ export function SettingsPage({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           apiKey: envConfig.apiKey.trim() || undefined,
-          authToken: envConfig.authToken.trim() || undefined,
-          internetEnv: envConfig.internetEnv || undefined,
           baseUrl: envConfig.baseUrl.trim() || undefined,
+          model: envConfig.model.trim() || undefined,
         }),
       });
-      
+
       const data = await response.json();
-      
+
       if (data.success) {
         MessagePlugin.success(data.message);
         setShowEnvConfig(false);
-        setEnvConfig({ apiKey: '', authToken: '', internetEnv: '', baseUrl: '' });
+        setEnvConfig({ apiKey: '', baseUrl: '', model: '' });
         // 重新检查登录状态
         checkLoginStatus();
       } else {
@@ -372,14 +369,14 @@ export function SettingsPage({
                       className="text-xs block mb-1"
                       style={{ color: 'var(--td-text-color-placeholder)' }}
                     >
-                      CODEBUDDY_API_KEY
+                      OPENAI_API_KEY
                     </label>
                     <Input
                       type="password"
                       size="small"
                       value={envConfig.apiKey}
                       onChange={(v) => setEnvConfig(prev => ({ ...prev, apiKey: v as string }))}
-                      placeholder="API 密钥（推荐）"
+                      placeholder="模型 API 密钥（必填）"
                     />
                   </div>
                   <div>
@@ -387,47 +384,27 @@ export function SettingsPage({
                       className="text-xs block mb-1"
                       style={{ color: 'var(--td-text-color-placeholder)' }}
                     >
-                      CODEBUDDY_AUTH_TOKEN
+                      OPENAI_MODEL
                     </label>
                     <Input
-                      type="password"
                       size="small"
-                      value={envConfig.authToken}
-                      onChange={(v) => setEnvConfig(prev => ({ ...prev, authToken: v as string }))}
-                      placeholder="认证令牌"
+                      value={envConfig.model}
+                      onChange={(v) => setEnvConfig(prev => ({ ...prev, model: v as string }))}
+                      placeholder="默认模型名，如 gpt-4o"
                     />
                   </div>
-                  <div>
+                  <div className="col-span-2">
                     <label 
                       className="text-xs block mb-1"
                       style={{ color: 'var(--td-text-color-placeholder)' }}
                     >
-                      CODEBUDDY_INTERNET_ENVIRONMENT
-                    </label>
-                    <Select
-                      size="small"
-                      value={envConfig.internetEnv}
-                      onChange={(v) => setEnvConfig(prev => ({ ...prev, internetEnv: v as any }))}
-                      placeholder="网络环境（可选）"
-                      clearable
-                      options={[
-                        { label: 'internal', value: 'internal' },
-                        { label: 'iOA', value: 'iOA' },
-                      ]}
-                    />
-                  </div>
-                  <div>
-                    <label 
-                      className="text-xs block mb-1"
-                      style={{ color: 'var(--td-text-color-placeholder)' }}
-                    >
-                      CODEBUDDY_BASE_URL
+                      OPENAI_BASE_URL
                     </label>
                     <Input
                       size="small"
                       value={envConfig.baseUrl}
                       onChange={(v) => setEnvConfig(prev => ({ ...prev, baseUrl: v as string }))}
-                      placeholder="自定义 URL（可选）"
+                      placeholder="兼容端点基址（OpenAI 官方留空）"
                     />
                   </div>
                 </div>
@@ -445,7 +422,7 @@ export function SettingsPage({
                     variant="text" 
                     onClick={() => {
                       setShowEnvConfig(false);
-                      setEnvConfig({ apiKey: '', authToken: '', internetEnv: '', baseUrl: '' });
+                      setEnvConfig({ apiKey: '', baseUrl: '', model: '' });
                     }}
                   >
                     取消
