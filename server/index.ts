@@ -118,6 +118,9 @@ app.get("/api/sessions/:sessionId", (req, res) => {
     const { sessionId } = req.params;
     const session = db.getSession(sessionId);
     if (!session) return res.status(404).json({ error: "会话不存在" });
+    if (session.owner_id !== (req as any).user?.userId) {
+      return res.status(403).json({ error: "无权访问该会话" });
+    }
     const messages = db.getMessagesBySession(sessionId);
     const parsedMessages = messages.map((msg) => ({
       ...msg,
@@ -138,6 +141,7 @@ app.post("/api/sessions", (req, res) => {
       id: uuidv4(),
       title,
       model,
+      owner_id: (req as any).user?.userId,
       created_at: now,
       updated_at: now,
     });
@@ -152,6 +156,11 @@ app.patch("/api/sessions/:sessionId", (req, res) => {
   try {
     const { sessionId } = req.params;
     const { title, model } = req.body;
+    const session = db.getSession(sessionId);
+    if (!session) return res.status(404).json({ error: "会话不存在" });
+    if (session.owner_id !== (req as any).user?.userId) {
+      return res.status(403).json({ error: "无权访问该会话" });
+    }
     const success = db.updateSession(sessionId, { title, model });
     if (!success) return res.status(404).json({ error: "会话不存在" });
     res.json({ success: true });
@@ -164,6 +173,11 @@ app.patch("/api/sessions/:sessionId", (req, res) => {
 app.delete("/api/sessions/:sessionId", (req, res) => {
   try {
     const { sessionId } = req.params;
+    const session = db.getSession(sessionId);
+    if (!session) return res.status(404).json({ error: "会话不存在" });
+    if (session.owner_id !== (req as any).user?.userId) {
+      return res.status(403).json({ error: "无权访问该会话" });
+    }
     const success = db.deleteSession(sessionId);
     if (!success) return res.status(404).json({ error: "会话不存在" });
     res.json({ success: true });
@@ -211,6 +225,10 @@ app.post("/api/chat", async (req, res) => {
 
   // 获取或创建会话
   let session = sessionId ? db.getSession(sessionId) : null;
+  if (session && session.owner_id !== (req as any).user?.userId) {
+    console.log(`[Chat] 无权访问会话: ${sessionId}`);
+    return res.status(403).json({ error: "无权访问该会话" });
+  }
   const now = new Date().toISOString();
 
   if (!session) {
