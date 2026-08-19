@@ -5,6 +5,9 @@ import { fileURLToPath } from "url";
 import fs from "fs";
 import * as db from "./db.js";
 import { runCodingAgent, PermissionResult } from "./agent.js";
+import { authMiddleware } from "./auth.js";
+import authRouter from "./routes/auth.js";
+import { registerBuiltinSkills } from "./skills/index.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -12,8 +15,18 @@ const __dirname = path.dirname(__filename);
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+// 启动时注册内置 Skill（工具定义与执行改由注册表动态提供）
+registerBuiltinSkills();
+
 // Middleware
 app.use(express.json());
+
+// ============= 认证保护（/api 下除公开接口外均需 JWT）=============
+const PUBLIC_API_PATHS = new Set(["/health", "/auth/login", "/auth/refresh"]);
+app.use("/api", (req, res, next) => {
+  if (PUBLIC_API_PATHS.has(req.path)) return next();
+  return authMiddleware(req, res, next);
+});
 
 // 待处理的权限请求
 interface PendingPermission {
@@ -65,33 +78,8 @@ app.get("/api/check-login", (req, res) => {
   res.json(response);
 });
 
-// 保存环境变量配置（当前进程有效，重启后失效）
-app.post("/api/save-env-config", (req, res) => {
-  const { apiKey, baseUrl, model } = req.body;
-  if (!apiKey && !baseUrl && !model) {
-    return res.status(400).json({ error: "请至少配置 API Key / BaseURL / Model 之一" });
-  }
-
-  const configuredVars: string[] = [];
-  if (apiKey) {
-    process.env.OPENAI_API_KEY = apiKey;
-    configuredVars.push("OPENAI_API_KEY");
-  }
-  if (baseUrl) {
-    process.env.OPENAI_BASE_URL = baseUrl;
-    configuredVars.push("OPENAI_BASE_URL");
-  }
-  if (model) {
-    process.env.OPENAI_MODEL = model;
-    configuredVars.push("OPENAI_MODEL");
-  }
-
-  res.json({
-    success: true,
-    message: `已设置: ${configuredVars.join(", ")}`,
-    note: "环境变量仅在当前服务器进程有效，重启后需要重新设置（建议写入 .env）",
-  });
-});
+// ============= 认证路由 =============
+app.use("/api/auth", authRouter);
 
 // ============= 模型列表 =============
 app.get("/api/models", (req, res) => {
@@ -112,7 +100,8 @@ app.get("/api/models", (req, res) => {
 // ============= 会话 API =============
 app.get("/api/sessions", (req, res) => {
   try {
-    const sessions = db.getAllSessions();
+    const ownerId = (req as any).user?.userId;
+    const sessions = db.getAllSessions(ownerId);
     const sessionsWithMessages = sessions.map((session) => {
       const messages = db.getMessagesBySession(session.id);
       return { ...session, messageCount: messages.length };
@@ -230,6 +219,7 @@ app.post("/api/chat", async (req, res) => {
       id: sessionId || uuidv4(),
       title: message.slice(0, 30) + (message.length > 30 ? "..." : ""),
       model: model || process.env.OPENAI_MODEL || "unknown",
+      owner_id: (req as any).user?.userId || "system",
       created_at: now,
       updated_at: now,
     });
@@ -348,6 +338,7 @@ app.post("/api/chat", async (req, res) => {
       permissionMode: pm,
       emit,
       requestPermission,
+      userId: (req as any).user?.userId,
     });
 
     db.createMessage({

@@ -15,6 +15,7 @@ ProCoder 是一个**单进程**全栈应用：Express 后端同时托管构建�
    - 本地 Ollama：`http://localhost:11434/v1`
    - Azure OpenAI：`https://<resource>.openai.azure.com/openai`
 3. `OPENAI_MODEL`：默认模型名（必填，如 `gpt-4o`、`deepseek-chat`）。
+4. `JWT_SECRET`：**生产环境必改**。JWT 签名密钥，默认 `change-me-in-production` 可被伪造。用 `openssl rand -base64 48` 生成随机串填入。
 
 ---
 
@@ -94,10 +95,16 @@ docker run -d --name procoder -p 3000:3000 \
 | `OPENAI_BASE_URL` | 兼容端点基址（OpenAI 官方留空） | 无 |
 | `OPENAI_MODEL` | 默认模型名（必填） | 无 |
 | `OPENAI_MODELS` | 可选模型下拉列表（逗号分隔） | 无 |
+| `JWT_SECRET` | JWT 签名密钥（**生产必改**） | `change-me-in-production` |
+| `JWT_EXPIRES_IN` | 访问令牌有效期 | `7d` |
+| `DEFAULT_ADMIN_USERNAME` | 首次启动创建的管理员用户名 | `admin` |
+| `DEFAULT_ADMIN_PASSWORD` | 首次启动创建的管理员密码 | `admin123` |
 | `DEFAULT_CWD` | 新建会话默认工作目录 | 进程启动目录 |
 | `DEFAULT_PERMISSION_MODE` | `default`/`acceptEdits`/`plan`/`bypassPermissions` | `default` |
 | `MAX_TURNS` | 单次请求最大工具轮数 | `10` |
 | `DEFAULT_SYSTEM_PROMPT` | 覆盖内置默认提示词 | 内置编码提示词 |
+
+> **登录说明**：首次启动若库中无用户，会自动创建默认管理员（`admin`/`admin123`）。访问 `http://<服务器IP>:3000` 会被重定向到登录页，登录后即可使用。请尽快修改默认密码与 `JWT_SECRET`。
 
 ---
 

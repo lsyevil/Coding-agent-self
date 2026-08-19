@@ -1,0 +1,256 @@
+import fs from 'fs';
+import fsp from 'fs/promises';
+import path from 'path';
+import { exec } from 'child_process';
+import { promisify } from 'util';
+import { Skill, SkillContext, ToolDefinition } from '../base.js';
+
+const execAsync = promisify(exec);
+
+const MAX_OUTPUT = 20000;
+
+// ---- 路径安全：限制在 workingDir 内 ----
+function resolveWithin(workingDir: string, p: string): string {
+  const base = path.resolve(workingDir);
+  const target = path.isAbsolute(p) ? path.resolve(p) : path.resolve(base, p);
+  const rel = path.relative(base, target);
+  if (rel.startsWith('..')) {
+    throw new Error(`路径超出工作目录，已拒绝: ${p}`);
+  }
+  return target;
+}
+
+function truncate(s: string): string {
+  if (s.length <= MAX_OUTPUT) return s;
+  return (
+    `...（输出过长，仅显示末尾 ${MAX_OUTPUT} 字符）...\n` + s.slice(s.length - MAX_OUTPUT)
+  );
+}
+
+// ---- 递归内容搜索 ----
+const IGNORE_DIRS = new Set(['node_modules', '.git', 'dist', 'build', '.cache', '.next', 'coverage']);
+
+function grepWalk(dir: string, pattern: string, matches: string[], filesSeen: number): void {
+  if (filesSeen > 400 || matches.length > 80) return;
+  let entries: fs.Dirent[];
+  try {
+    entries = fs.readdirSync(dir, { withFileTypes: true });
+  } catch {
+    return;
+  }
+  for (const e of entries) {
+    if (matches.length > 80 || filesSeen > 400) break;
+    const full = path.join(dir, e.name);
+    if (e.isDirectory()) {
+      if (IGNORE_DIRS.has(e.name)) continue;
+      grepWalk(full, pattern, matches, filesSeen);
+    } else if (e.isFile()) {
+      filesSeen++;
+      let content: string;
+      try {
+        const stat = fs.statSync(full);
+        if (stat.size > 1024 * 1024) return;
+        content = fs.readFileSync(full, 'utf8');
+      } catch {
+        return;
+      }
+      let regex: RegExp;
+      try {
+        regex = new RegExp(pattern, 'gi');
+      } catch {
+        regex = new RegExp(pattern.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi');
+      }
+      const lines = content.split('\n');
+      for (let i = 0; i < lines.length; i++) {
+        if (regex.test(lines[i])) {
+          matches.push(`${path.relative(dir, full)}:${i + 1}: ${lines[i].slice(0, 200)}`);
+          if (matches.length > 80) break;
+        }
+      }
+    }
+  }
+}
+
+const TOOL_DEFS: ToolDefinition[] = [
+  {
+    type: 'function',
+    function: {
+      name: 'read_file',
+      description: '读取文件内容（UTF-8）。用于查看现有代码、配置、日志等。',
+      parameters: {
+        type: 'object',
+        properties: { path: { type: 'string', description: '相对或绝对文件路径' } },
+        required: ['path'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'list_directory',
+      description: '列出目录内容，标注目录(DIR)/文件(FILE)。',
+      parameters: {
+        type: 'object',
+        properties: { path: { type: 'string', description: '目录路径，默认当前工作目录' } },
+        required: ['path'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'search_files',
+      description: '在工作目录内递归搜索文件内容（支持正则）。忽略 node_modules/.git/dist 等。',
+      parameters: {
+        type: 'object',
+        properties: {
+          pattern: { type: 'string', description: '搜索关键词或正则表达式' },
+          path: { type: 'string', description: '搜索起点目录，默认工作目录' },
+        },
+        required: ['pattern'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'write_file',
+      description: '创建或覆盖写入文件（会修改磁盘，需要权限）。',
+      parameters: {
+        type: 'object',
+        properties: {
+          path: { type: 'string', description: '文件路径' },
+          content: { type: 'string', description: '完整文件内容' },
+        },
+        required: ['path', 'content'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'edit_file',
+      description: '用精确字符串替换修改文件中的一处或多处文本（会修改磁盘，需要权限）。old_string 必须唯一。',
+      parameters: {
+        type: 'object',
+        properties: {
+          path: { type: 'string', description: '文件路径' },
+          old_string: { type: 'string', description: '要被替换的原始文本（需唯一）' },
+          new_string: { type: 'string', description: '替换后的新文本' },
+        },
+        required: ['path', 'old_string', 'new_string'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'delete_file',
+      description: '删除文件（会修改磁盘，需要权限）。',
+      parameters: {
+        type: 'object',
+        properties: { path: { type: 'string', description: '文件路径' } },
+        required: ['path'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'run_command',
+      description: '在服务器上执行 shell 命令（会修改环境，需要权限）。用于安装依赖、运行测试、构建、git 等操作。',
+      parameters: {
+        type: 'object',
+        properties: {
+          command: { type: 'string', description: '要执行的 shell 命令' },
+          cwd: { type: 'string', description: '命令工作目录，默认 Agent 工作目录' },
+        },
+        required: ['command'],
+      },
+    },
+  },
+];
+
+export const codingSkill: Skill = {
+  name: 'coding',
+  displayName: '代码操作',
+  description: '读写文件、搜索代码、执行命令，用于专业级编程任务。',
+  enabled: true,
+
+  getTools(): ToolDefinition[] {
+    return TOOL_DEFS;
+  },
+
+  async execute(
+    name: string,
+    input: Record<string, unknown>,
+    context: SkillContext
+  ): Promise<string> {
+    const workingDir = context.workingDir;
+    switch (name) {
+      case 'read_file': {
+        const p = resolveWithin(workingDir, String(input.path));
+        const content = await fsp.readFile(p, 'utf8');
+        return truncate(content);
+      }
+      case 'list_directory': {
+        const p = resolveWithin(workingDir, String(input.path || '.'));
+        const entries = await fsp.readdir(p, { withFileTypes: true });
+        const lines = entries
+          .sort((a, b) => Number(b.isDirectory()) - Number(a.isDirectory()))
+          .map((e) => `${e.isDirectory() ? '[DIR] ' : '[FILE] '}${e.name}`);
+        return `目录 ${p}:\n` + lines.join('\n');
+      }
+      case 'search_files': {
+        const start = resolveWithin(workingDir, String(input.path || '.'));
+        const matches: string[] = [];
+        grepWalk(start, String(input.pattern), matches, 0);
+        return matches.length
+          ? `匹配 "${input.pattern}" (${matches.length}):\n` + matches.join('\n')
+          : `未找到匹配 "${input.pattern}"`;
+      }
+      case 'write_file': {
+        const p = resolveWithin(workingDir, String(input.path));
+        await fsp.mkdir(path.dirname(p), { recursive: true });
+        await fsp.writeFile(p, String(input.content), 'utf8');
+        const size = Buffer.byteLength(String(input.content));
+        return `已写入 ${p} (${size} 字节)`;
+      }
+      case 'edit_file': {
+        const p = resolveWithin(workingDir, String(input.path));
+        const oldStr = String(input.old_string);
+        const newStr = String(input.new_string);
+        const text = await fsp.readFile(p, 'utf8');
+        const count = text.split(oldStr).length - 1;
+        if (count === 0) throw new Error('未找到 old_string，请确认文本与缩进完全一致');
+        if (count > 1) throw new Error(`old_string 出现 ${count} 次，不唯一，请提供更多上下文`);
+        const updated = text.replace(oldStr, newStr);
+        await fsp.writeFile(p, updated, 'utf8');
+        return `已更新 ${p}`;
+      }
+      case 'delete_file': {
+        const p = resolveWithin(workingDir, String(input.path));
+        await fsp.unlink(p);
+        return `已删除 ${p}`;
+      }
+      case 'run_command': {
+        const cmd = String(input.command);
+        const cwd = resolveWithin(workingDir, String(input.cwd || '.'));
+        try {
+          const { stdout, stderr } = await execAsync(cmd, {
+            cwd,
+            maxBuffer: 20 * 1024 * 1024,
+            timeout: 120000,
+          });
+          const out = (stdout || '') + (stderr ? `\n[stderr]\n${stderr}` : '');
+          return truncate(out || '(命令无输出)');
+        } catch (e: any) {
+          const out = `${(e.stdout || '') + (e.stderr ? '\n' + e.stderr : '')}\n[exit ${e.code ?? '?'}] ${e.message || ''}`;
+          return truncate(out);
+        }
+      }
+      default:
+        throw new Error(`未知工具: ${name}`);
+    }
+  },
+};

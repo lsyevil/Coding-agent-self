@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Routes, Route, useNavigate, useParams, useLocation } from 'react-router-dom';
+import { Routes, Route, Navigate, useNavigate, useParams, useLocation } from 'react-router-dom';
 import '@tdesign-react/chat/es/style/index.js';
 
 import { useAgents } from './hooks/useAgents';
@@ -13,15 +13,19 @@ import { Sidebar } from './components/Sidebar';
 import { Header } from './components/Header';
 import { SettingsPage } from './components/SettingsPage';
 import { ChatPage } from './pages/ChatPage';
+import LoginPage from './pages/LoginPage';
+import AppLayout from './components/Layout/AppLayout';
+import ComingSoon from './pages/ComingSoon';
+import { useAuthStore } from './stores/authStore';
 
-function App() {
-  return (
-    <Routes>
-      <Route path="/" element={<AppContent />} />
-      <Route path="/chat/:sessionId" element={<AppContent />} />
-      <Route path="/settings" element={<AppContent />} />
-    </Routes>
-  );
+/** 路由守卫：未登录跳转到登录页 */
+function ProtectedRoute({ children }: { children: React.ReactNode }) {
+  const token = useAuthStore((s) => s.token);
+  const location = useLocation();
+  if (!token) {
+    return <Navigate to="/login" replace state={{ from: location }} />;
+  }
+  return <>{children}</>;
 }
 
 function AppContent() {
@@ -29,7 +33,7 @@ function AppContent() {
   const { sessionId: urlSessionId } = useParams<{ sessionId: string }>();
   const location = useLocation();
   const isSettingsPage = location.pathname === '/settings';
-  
+
   // Hooks
   const { theme, toggleTheme } = useTheme();
   const { agents, addAgent, updateAgent, deleteAgent, getAgent } = useAgents();
@@ -131,12 +135,12 @@ function AppContent() {
 
   // Sidebar 状态
   const [sidebarOpen, setSidebarOpen] = useState(true);
-  
+
   // 权限模式状态
   const [permissionMode, setPermissionMode] = useState<PermissionMode>('default');
 
   return (
-    <div 
+    <div
       className="flex h-screen w-screen"
       style={{ backgroundColor: 'var(--td-bg-color-page)' }}
     >
@@ -155,7 +159,7 @@ function AppContent() {
       />
 
       {/* 主内容区 */}
-      <main 
+      <main
         className="flex-1 flex flex-col min-w-0"
         style={{ backgroundColor: 'var(--td-bg-color-page)' }}
       >
@@ -201,6 +205,30 @@ function AppContent() {
         )}
       </main>
     </div>
+  );
+}
+
+function App() {
+  return (
+    <Routes>
+      <Route path="/login" element={<LoginPage />} />
+      <Route
+        element={
+          <ProtectedRoute>
+            <AppLayout />
+          </ProtectedRoute>
+        }
+      >
+        <Route path="/" element={<Navigate to="/chat" replace />} />
+        <Route path="/chat" element={<AppContent />} />
+        <Route path="/chat/:sessionId" element={<AppContent />} />
+        <Route path="/settings" element={<AppContent />} />
+        <Route path="/im" element={<ComingSoon title="IM 会话" />} />
+        <Route path="/tasks" element={<ComingSoon title="待办" />} />
+        <Route path="/calendar" element={<ComingSoon title="日程" />} />
+        <Route path="/literature" element={<ComingSoon title="文献" />} />
+      </Route>
+    </Routes>
   );
 }
 

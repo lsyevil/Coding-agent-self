@@ -23,6 +23,7 @@ import {
 } from 'tdesign-icons-react';
 import { Bot, Sparkles, Code, FileText, Globe, Lightbulb } from 'lucide-react';
 import { CustomAgent, PermissionMode } from '../types';
+import { apiFetch } from '../api/http';
 
 interface SettingsPageProps {
   agents: CustomAgent[];
@@ -123,21 +124,12 @@ export function SettingsPage({
     checking: true,
   });
   
-  // 环境变量配置
-  const [showEnvConfig, setShowEnvConfig] = useState(false);
-  const [envConfig, setEnvConfig] = useState({
-    apiKey: '',
-    baseUrl: '',
-    model: '',
-  });
-  const [savingEnv, setSavingEnv] = useState(false);
-
   // 检查登录状态
   const checkLoginStatus = useCallback(async () => {
     setLoginStatus(prev => ({ ...prev, checking: true, error: undefined }));
     
     try {
-      const response = await fetch('/api/check-login');
+      const response = await apiFetch('/api/check-login');
       const data = await response.json();
       
       setLoginStatus({
@@ -159,45 +151,6 @@ export function SettingsPage({
     }
   }, []);
   
-  // 保存环境变量配置
-  const saveEnvConfig = async () => {
-    // 至少需要配置一个有效的值
-    const hasAnyConfig = envConfig.apiKey.trim() || envConfig.model.trim() || envConfig.baseUrl.trim();
-    if (!hasAnyConfig) {
-      MessagePlugin.warning('请至少配置 API Key / Model / BaseURL 之一');
-      return;
-    }
-
-    setSavingEnv(true);
-    try {
-      const response = await fetch('/api/save-env-config', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          apiKey: envConfig.apiKey.trim() || undefined,
-          baseUrl: envConfig.baseUrl.trim() || undefined,
-          model: envConfig.model.trim() || undefined,
-        }),
-      });
-
-      const data = await response.json();
-
-      if (data.success) {
-        MessagePlugin.success(data.message);
-        setShowEnvConfig(false);
-        setEnvConfig({ apiKey: '', baseUrl: '', model: '' });
-        // 重新检查登录状态
-        checkLoginStatus();
-      } else {
-        MessagePlugin.error(data.error || '保存失败');
-      }
-    } catch (error: any) {
-      MessagePlugin.error(error?.message || '保存失败');
-    } finally {
-      setSavingEnv(false);
-    }
-  };
-
   // 初始化时检查登录状态
   useEffect(() => {
     checkLoginStatus();
@@ -296,7 +249,7 @@ export function SettingsPage({
                 className="text-sm mt-1"
                 style={{ color: 'var(--td-text-color-secondary)' }}
               >
-                支持环境变量或 CodeBuddy CLI 登录
+                模型在 .env 中配置，账号登录使用 JWT
               </p>
             </div>
             <Button 
@@ -352,127 +305,11 @@ export function SettingsPage({
             )}
           </div>
           
-          {/* 环境变量配置 */}
-          <div className="mb-6">
-            <h3 
-              className="text-sm font-medium mb-3"
-              style={{ color: 'var(--td-text-color-secondary)' }}
-            >
-              方式一：环境变量
-            </h3>
-            
-            {showEnvConfig ? (
-              <div className="space-y-3">
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label 
-                      className="text-xs block mb-1"
-                      style={{ color: 'var(--td-text-color-placeholder)' }}
-                    >
-                      OPENAI_API_KEY
-                    </label>
-                    <Input
-                      type="password"
-                      size="small"
-                      value={envConfig.apiKey}
-                      onChange={(v) => setEnvConfig(prev => ({ ...prev, apiKey: v as string }))}
-                      placeholder="模型 API 密钥（必填）"
-                    />
-                  </div>
-                  <div>
-                    <label 
-                      className="text-xs block mb-1"
-                      style={{ color: 'var(--td-text-color-placeholder)' }}
-                    >
-                      OPENAI_MODEL
-                    </label>
-                    <Input
-                      size="small"
-                      value={envConfig.model}
-                      onChange={(v) => setEnvConfig(prev => ({ ...prev, model: v as string }))}
-                      placeholder="默认模型名，如 gpt-4o"
-                    />
-                  </div>
-                  <div className="col-span-2">
-                    <label 
-                      className="text-xs block mb-1"
-                      style={{ color: 'var(--td-text-color-placeholder)' }}
-                    >
-                      OPENAI_BASE_URL
-                    </label>
-                    <Input
-                      size="small"
-                      value={envConfig.baseUrl}
-                      onChange={(v) => setEnvConfig(prev => ({ ...prev, baseUrl: v as string }))}
-                      placeholder="兼容端点基址（OpenAI 官方留空）"
-                    />
-                  </div>
-                </div>
-                <div className="flex items-center gap-2">
-                  <Button 
-                    size="small"
-                    theme="primary" 
-                    onClick={saveEnvConfig}
-                    loading={savingEnv}
-                  >
-                    保存
-                  </Button>
-                  <Button 
-                    size="small"
-                    variant="text" 
-                    onClick={() => {
-                      setShowEnvConfig(false);
-                      setEnvConfig({ apiKey: '', baseUrl: '', model: '' });
-                    }}
-                  >
-                    取消
-                  </Button>
-                  <span 
-                    className="text-xs"
-                    style={{ color: 'var(--td-text-color-placeholder)' }}
-                  >
-                    仅当前进程有效
-                  </span>
-                </div>
-              </div>
-            ) : (
-              <Button 
-                variant="outline" 
-                size="small"
-                onClick={() => setShowEnvConfig(true)}
-              >
-                配置环境变量
-              </Button>
-            )}
-          </div>
-          
-          {/* CLI 登录 */}
-          <div>
-            <h3 
-              className="text-sm font-medium mb-3"
-              style={{ color: 'var(--td-text-color-secondary)' }}
-            >
-              方式二：CodeBuddy CLI
-            </h3>
-            <div className="flex items-center gap-3">
-              <code 
-                className="px-3 py-1.5 rounded text-sm"
-                style={{ 
-                  backgroundColor: 'var(--td-bg-color-component)',
-                  color: 'var(--td-text-color-primary)'
-                }}
-              >
-                codebuddy
-              </code>
-              <Link 
-                href="https://www.codebuddy.ai/docs/zh/cli/settings" 
-                target="_blank"
-                theme="primary"
-                size="small"
-              >
-                查看文档
-              </Link>
-            </div>
+          <div 
+            className="text-sm"
+            style={{ color: 'var(--td-text-color-secondary)' }}
+          >
+            模型与端点通过服务端 <code>.env</code> 中的 <code>OPENAI_API_KEY</code> / <code>OPENAI_BASE_URL</code> / <code>OPENAI_MODEL</code> 配置，重启服务后生效；账号登录使用 JWT（默认管理员 admin / admin123）。
           </div>
           
           {loginStatus.error && !loginStatus.isLoggedIn && (
