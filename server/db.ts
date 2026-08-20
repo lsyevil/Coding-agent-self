@@ -912,4 +912,88 @@ export function getUserAvailability(userId: string, startTime: string, endTime: 
   };
 }
 
+// ============= 文献操作 =============
+
+export interface DbPaper {
+  id: string;
+  title: string;
+  authors: string | null;
+  year: number | null;
+  venue: string | null;
+  abstract: string | null;
+  doi: string | null;
+  url: string | null;
+  source: string | null;
+  tags: string | null;
+  status: 'unread' | 'reading' | 'finished';
+  notes: string | null;
+  added_by: string;
+  added_at: string;
+  updated_at: string;
+}
+
+export interface DbPaperNote {
+  id: string;
+  paper_id: string;
+  user_id: string;
+  content: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export function getPapers(filter?: { status?: string; tag?: string; search?: string }): DbPaper[] {
+  let sql = 'SELECT * FROM papers';
+  const conditions: string[] = [];
+  const params: any[] = [];
+  if (filter?.status) { conditions.push('status = ?'); params.push(filter.status); }
+  if (filter?.tag) { conditions.push('tags LIKE ?'); params.push('%' + filter.tag + '%'); }
+  if (filter?.search) { conditions.push('(title LIKE ? OR authors LIKE ? OR abstract LIKE ?)'); const s = '%' + filter.search + '%'; params.push(s, s, s); }
+  if (conditions.length > 0) sql += ' WHERE ' + conditions.join(' AND ');
+  sql += ' ORDER BY added_at DESC';
+  return db.prepare(sql).all(...params) as DbPaper[];
+}
+
+export function getPaper(id: string): DbPaper | undefined {
+  return db.prepare('SELECT * FROM papers WHERE id = ?').get(id) as DbPaper | undefined;
+}
+
+export function createPaper(paper: DbPaper): DbPaper {
+  db.prepare('INSERT INTO papers (id, title, authors, year, venue, abstract, doi, url, source, tags, status, notes, added_by, added_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(
+    paper.id, paper.title, paper.authors, paper.year, paper.venue, paper.abstract, paper.doi, paper.url, paper.source, paper.tags, paper.status, paper.notes, paper.added_by, paper.added_at, paper.updated_at
+  );
+  return paper;
+}
+
+export function updatePaper(id: string, updates: Partial<Pick<DbPaper, 'title' | 'authors' | 'year' | 'venue' | 'abstract' | 'doi' | 'url' | 'tags' | 'status' | 'notes'>>): boolean {
+  const fields: string[] = [];
+  const values: any[] = [];
+  for (const [key, val] of Object.entries(updates)) { if (val !== undefined) { fields.push(key + ' = ?'); values.push(val); } }
+  if (fields.length === 0) return false;
+  fields.push('updated_at = ?');
+  values.push(new Date().toISOString());
+  values.push(id);
+  return db.prepare('UPDATE papers SET ' + fields.join(', ') + ' WHERE id = ?').run(...values).changes > 0;
+}
+
+export function deletePaper(id: string): boolean {
+  return db.prepare('DELETE FROM papers WHERE id = ?').run(id).changes > 0;
+}
+
+export function getPaperNotes(paperId: string): DbPaperNote[] {
+  return db.prepare('SELECT * FROM paper_notes WHERE paper_id = ? ORDER BY created_at ASC').all(paperId) as DbPaperNote[];
+}
+
+export function createPaperNote(note: DbPaperNote): DbPaperNote {
+  db.prepare('INSERT INTO paper_notes (id, paper_id, user_id, content, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)').run(note.id, note.paper_id, note.user_id, note.content, note.created_at, note.updated_at);
+  return note;
+}
+
+export function updatePaperNote(id: string, content: string, userId: string): boolean {
+  return db.prepare('UPDATE paper_notes SET content = ?, updated_at = ? WHERE id = ? AND user_id = ?').run(content, new Date().toISOString(), id, userId).changes > 0;
+}
+
+export function deletePaperNote(id: string, userId: string): boolean {
+  return db.prepare('DELETE FROM paper_notes WHERE id = ? AND user_id = ?').run(id, userId).changes > 0;
+}
+
 export default db;
