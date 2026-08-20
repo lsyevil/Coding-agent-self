@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { Tabs, Table, Switch, Empty, message } from 'antd';
 import { useAuthStore } from '../stores/authStore';
 import { apiFetch } from '../api/http';
+import { UserManagement } from '../components/Settings/UserManagement';
 
 interface Skill {
   name: string;
@@ -113,6 +114,11 @@ export function SettingsPage() {
             key: 'skill',
             label: 'Skill 管理',
             children: <SkillManagement />,
+          },
+          {
+            key: 'user',
+            label: '用户管理',
+            children: <UserManagement />,
           },
         ]
       : []),
