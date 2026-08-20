@@ -1,4 +1,23 @@
 import { apiFetch } from './http';
+import { setToken } from './http';
+import type { AuthUser } from '../stores/authStore';
+
+export interface LoginResult {
+  token: string;
+  user: AuthUser;
+}
+
+export async function login(username: string, password: string): Promise<LoginResult> {
+  const res = await apiFetch('/api/auth/login', {
+    method: 'POST',
+    body: JSON.stringify({ username, password }),
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.error || '登录失败');
+  }
+  return res.json();
+}
 
 export interface RegisterData {
   username: string;
