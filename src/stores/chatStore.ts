@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { apiFetch } from '../api/http';
+import { getAgentById } from '../config/agents';
 
 interface Session {
   id: string;
@@ -33,10 +34,15 @@ interface ChatState {
   isLoading: boolean;
   streamingContent: string;
   streamingToolCalls: ToolCall[];
-  
+
+  selectedModel: string | null; // null 表示使用后端默认模型
+  setSelectedModel: (model: string) => void;
+  currentAgentId: string;
+  setCurrentAgent: (agentId: string) => void;
+
   fetchSessions: () => Promise<void>;
   selectSession: (id: string) => Promise<void>;
-  createSession: (title?: string) => Promise<string>;
+  createSession: (title?: string, model?: string) => Promise<string>;
   deleteSession: (id: string) => Promise<void>;
   sendMessage: (content: string) => Promise<void>;
   stopGeneration: () => void;
@@ -52,6 +58,17 @@ export const useChatStore = create<ChatState>((set, get) => ({
   isLoading: false,
   streamingContent: '',
   streamingToolCalls: [],
+
+  selectedModel: null,
+  currentAgentId: 'default',
+
+  setSelectedModel: (model: string) => {
+    set({ selectedModel: model || null });
+  },
+
+  setCurrentAgent: (agentId: string) => {
+    set({ currentAgentId: agentId });
+  },
 
   fetchSessions: async () => {
     try {
@@ -82,10 +99,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }
   },
 
-  createSession: async (title?: string) => {
+  createSession: async (title?: string, model?: string) => {
     const res = await apiFetch('/api/sessions', {
       method: 'POST',
-      body: JSON.stringify({ title: title || '新对话' }),
+      body: JSON.stringify({ title: title || '新对话', model: model || undefined }),
     });
     const data = await res.json();
     await get().fetchSessions();
@@ -105,9 +122,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
     const state = get();
     let sessionId = state.currentSessionId;
 
-    // 如果没有当前会话，先创建
+    // 如果没有当前会话，先创建（带模型参数）
     if (!sessionId) {
-      sessionId = await state.createSession(content.slice(0, 30));
+      sessionId = await state.createSession(content.slice(0, 30), state.selectedModel || undefined);
     }
 
     // 添加用户消息到本地列表
@@ -129,13 +146,20 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
     try {
       const token = localStorage.getItem('token');
+      const agent = getAgentById(state.currentAgentId);
+      const systemPrompt = agent?.systemPrompt || '';
       const response = await fetch('/api/chat', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${token}`,
         },
-        body: JSON.stringify({ sessionId, message: content }),
+        body: JSON.stringify({
+          sessionId,
+          message: content,
+          model: state.selectedModel || undefined,
+          systemPrompt: systemPrompt || undefined,
+        }),
         signal: abortController.signal,
       });
 
