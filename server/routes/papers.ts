@@ -52,7 +52,7 @@ router.post('/search', async (req, res) => {
   const { query, maxResults = 10 } = req.body;
   if (!query?.trim()) return res.status(400).json({ error: '搜索词不能为空' });
   try {
-    const arxivUrl = \http://export.arxiv.org/api/query?search_query=all:\&start=0&max_results=\;
+    const arxivUrl = `http://export.arxiv.org/api/query?search_query=all:${encodeURIComponent(query)}&start=0&max_results=${maxResults}`;
     const response = await fetch(arxivUrl);
     const text = await response.text();
     const entries = parseArxivXml(text);
