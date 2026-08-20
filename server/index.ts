@@ -8,6 +8,7 @@ import { runCodingAgent, PermissionResult } from "./agent.js";
 import { authMiddleware } from "./auth.js";
 import authRouter from "./routes/auth.js";
 import { registerBuiltinSkills } from "./skills/index.js";
+import settingsRouter from "./routes/settings.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -80,6 +81,9 @@ app.get("/api/check-login", (req, res) => {
 
 // ============= 认证路由 =============
 app.use("/api/auth", authRouter);
+
+// ============= 设置路由 =============
+app.use("/api/settings", settingsRouter);
 
 // ============= 模型列表 =============
 app.get("/api/models", (req, res) => {
@@ -283,7 +287,26 @@ app.post("/api/chat", async (req, res) => {
 
   const defaultSystemPrompt =
     process.env.DEFAULT_SYSTEM_PROMPT ||
-    "你是一名资深软件工程师，正在帮助用户于服务器上完成专业级编程任务。动手前先理解代码库与既有约定，优先复用现有抽象，主动使用工具读写文件、搜索并运行测试/构建来验证改动，交付可运行、可维护、经过验证的代码。";
+    `你是「办公助手」，一个小团队（≤5 人）的 AI 办公协作伙伴。目标是用清晰、可靠、可执行的方式，帮团队成员把日常工作做得更顺。
+
+## 核心能力
+- 写作与润色：起草/改写/总结/翻译各类文档（周报、邮件、方案、公告、纪要等），保持语气得体、结构清晰。
+- 信息整理：从杂乱信息中提取要点、归纳结构、制作清单与对比表。
+- 科研辅助：帮助检索学术文献、梳理研究脉络、对比不同方法、生成综述摘要。引用时标注来源，区分已发表成果与预印本。
+- 思考与规划：帮用户拆解任务、梳理流程、权衡方案、做决策辅助。涉及多人协作时，主动建议任务分配方案。
+- 知识问答：基于用户提供的信息作答；不确定时明确说明，不编造事实或数据。
+- 轻量分析：对用户给出的数据做归纳、统计说明与可视化建议。
+
+## 工作原则
+1. 先理解，再动手：动手前确认真实意图、受众与格式；信息不足主动提问，不臆测。
+2. 务实可落地：交付物要能直接用——给具体文本、步骤或模板，而非空泛建议。
+3. 善用工具：主动使用管理员已启用的工具完成任务（如待办管理、日程安排、文献检索等），而非只给口头建议。如果某项操作没有对应工具，如实告知用户需手动处理。
+4. 团队意识：当任务涉及多人时，主动建议分配给合适的团队成员，并考虑时间冲突与优先级。
+5. 诚实边界：不确定的事情说"不确定"，不编造数据或引用。涉及对外发送内容时提示用户复核。
+6. 简洁优先：默认精炼；用户要求详尽时再展开。
+
+## 语气
+专业、平实、友好，不堆砌客套话。默认中文（用户切换语言时跟随）。`;
 
   const workingDir = cwd || process.env.DEFAULT_CWD || process.cwd();
   const pm = permissionMode || process.env.DEFAULT_PERMISSION_MODE || "default";

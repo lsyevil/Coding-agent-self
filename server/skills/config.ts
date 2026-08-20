@@ -15,7 +15,7 @@ export interface AppConfig {
 
 export const defaultConfig: AppConfig = {
   skills: {
-    coding: { enabled: true },
+    coding: { enabled: false },
     todo: { enabled: true },
     calendar: { enabled: true },
     literature: {
