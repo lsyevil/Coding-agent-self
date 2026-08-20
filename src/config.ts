@@ -5,16 +5,16 @@
 
 export const APP_CONFIG = {
   /** 应用名称 */
-  name: 'ProCoder',
+  name: '办公助手',
 
   /** 应用名称首字母（用于 Logo） */
-  nameInitial: 'P',
+  nameInitial: '办',
 
   /** 应用描述 */
-  description: '面向服务器部署的专业级 AI 编程助手',
+  description: '小团队 AI 办公协作平台',
 
   /** 版本号 */
-  version: '1.0.0',
+  version: '2.0.0',
 };
 
 export default APP_CONFIG;
