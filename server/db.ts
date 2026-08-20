@@ -754,4 +754,162 @@ export function deleteTaskComment(id: string, userId: string): boolean {
   return db.prepare('DELETE FROM task_comments WHERE id = ? AND user_id = ?').run(id, userId).changes > 0;
 }
 
+// ============= 日程操作 =============
+
+export interface DbEvent {
+  id: string;
+  title: string;
+  description: string | null;
+  location: string | null;
+  start_time: string;
+  end_time: string;
+  is_all_day: number;  // 0 or 1
+  created_by: string;
+  reminder_minutes: number | null;
+  created_at: string;
+  updated_at: string;
+}
+
+/** 获取日程列表（支持时间范围筛选） */
+export function getEvents(filter?: { 
+  startTime?: string;
+  endTime?: string;
+  userId?: string;
+}): DbEvent[] {
+  let sql = `
+    SELECT DISTINCT e.* FROM events e
+    LEFT JOIN event_participants ep ON ep.event_id = e.id
+  `;
+  const conditions: string[] = [];
+  const params: any[] = [];
+
+  if (filter?.startTime) {
+    conditions.push('e.end_time >= ?');
+    params.push(filter.startTime);
+  }
+  if (filter?.endTime) {
+    conditions.push('e.start_time <= ?');
+    params.push(filter.endTime);
+  }
+  if (filter?.userId) {
+    conditions.push('ep.user_id = ?');
+    params.push(filter.userId);
+  }
+
+  if (conditions.length > 0) {
+    sql += ' WHERE ' + conditions.join(' AND ');
+  }
+  sql += ' ORDER BY e.start_time ASC';
+
+  return db.prepare(sql).all(...params) as DbEvent[];
+}
+
+/** 获取日程详情 */
+export function getEvent(id: string): DbEvent | undefined {
+  return db.prepare('SELECT * FROM events WHERE id = ?').get(id) as DbEvent | undefined;
+}
+
+/** 创建日程 */
+export function createEvent(event: DbEvent): DbEvent {
+  db.prepare(`
+    INSERT INTO events (id, title, description, location, start_time, end_time, is_all_day, created_by, reminder_minutes, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    event.id, event.title, event.description, event.location,
+    event.start_time, event.end_time, event.is_all_day,
+    event.created_by, event.reminder_minutes, event.created_at, event.updated_at
+  );
+  return event;
+}
+
+/** 更新日程 */
+export function updateEvent(id: string, updates: Partial<Pick<DbEvent, 'title' | 'description' | 'location' | 'start_time' | 'end_time' | 'is_all_day' | 'reminder_minutes'>>): boolean {
+  const fields: string[] = [];
+  const values: any[] = [];
+
+  for (const [key, val] of Object.entries(updates)) {
+    if (val !== undefined) {
+      fields.push(`${key} = ?`);
+      values.push(val);
+    }
+  }
+
+  if (fields.length === 0) return false;
+
+  fields.push('updated_at = ?');
+  values.push(new Date().toISOString());
+  values.push(id);
+
+  const stmt = db.prepare(`UPDATE events SET ${fields.join(', ')} WHERE id = ?`);
+  return stmt.run(...values).changes > 0;
+}
+
+/** 删除日程 */
+export function deleteEvent(id: string): boolean {
+  return db.prepare('DELETE FROM events WHERE id = ?').run(id).changes > 0;
+}
+
+/** 获取日程参与人列表 */
+export function getEventParticipants(eventId: string): Array<DbUser & { status: string }> {
+  return db.prepare(`
+    SELECT u.*, ep.status FROM users u
+    JOIN event_participants ep ON ep.user_id = u.id
+    WHERE ep.event_id = ?
+  `).all(eventId) as Array<DbUser & { status: string }>;
+}
+
+/** 添加日程参与人 */
+export function addEventParticipant(eventId: string, userId: string, status: 'pending' | 'accepted' | 'declined' = 'pending'): void {
+  db.prepare(`
+    INSERT OR IGNORE INTO event_participants (event_id, user_id, status)
+    VALUES (?, ?, ?)
+  `).run(eventId, userId, status);
+}
+
+/** 移除日程参与人 */
+export function removeEventParticipant(eventId: string, userId: string): void {
+  db.prepare('DELETE FROM event_participants WHERE event_id = ? AND user_id = ?').run(eventId, userId);
+}
+
+/** 更新参与人 RSVP 状态 */
+export function updateParticipantStatus(eventId: string, userId: string, status: 'pending' | 'accepted' | 'declined'): boolean {
+  const result = db.prepare(`
+    UPDATE event_participants SET status = ? WHERE event_id = ? AND user_id = ?
+  `).run(status, eventId, userId);
+  return result.changes > 0;
+}
+
+/** 检测时间冲突：返回指定时间段内有冲突的日程 */
+export function findConflictingEvents(startTime: string, endTime: string, excludeEventId?: string): DbEvent[] {
+  let sql = `
+    SELECT * FROM events
+    WHERE start_time < ? AND end_time > ?
+  `;
+  const params: any[] = [endTime, startTime];
+
+  if (excludeEventId) {
+    sql += ' AND id != ?';
+    params.push(excludeEventId);
+  }
+
+  return db.prepare(sql).all(...params) as DbEvent[];
+}
+
+/** 获取用户在指定时间段的空闲状态 */
+export function getUserAvailability(userId: string, startTime: string, endTime: string): { busy: boolean; events: DbEvent[] } {
+  const events = db.prepare(`
+    SELECT e.* FROM events e
+    JOIN event_participants ep ON ep.event_id = e.id
+    WHERE ep.user_id = ?
+      AND e.start_time < ?
+      AND e.end_time > ?
+    ORDER BY e.start_time ASC
+  `).all(userId, endTime, startTime) as DbEvent[];
+
+  return {
+    busy: events.length > 0,
+    events,
+  };
+}
+
 export default db;

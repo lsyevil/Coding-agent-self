@@ -8,6 +8,7 @@ import { ComingSoon } from './pages/ComingSoon';
 import { SettingsPage } from './pages/SettingsPage';
 import { IMPage } from './pages/IMPage';
 import { TasksPage } from './pages/TasksPage';
+import { CalendarPage } from './pages/CalendarPage';
 import { ProtectedRoute } from './components/ProtectedRoute';
 
 function App() {
@@ -30,7 +31,7 @@ function App() {
             <Route path="im" element={<IMPage />} />
             <Route path="im/:conversationId" element={<IMPage />} />
             <Route path="tasks" element={<TasksPage />} />
-            <Route path="calendar" element={<ComingSoon title="日程" />} />
+            <Route path="calendar" element={<CalendarPage />} />
             <Route path="literature" element={<ComingSoon title="文献" />} />
             <Route path="settings" element={<SettingsPage />} />
           </Route>

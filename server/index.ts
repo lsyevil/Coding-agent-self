@@ -12,6 +12,7 @@ import { registerBuiltinSkills } from "./skills/index.js";
 import settingsRouter from "./routes/settings.js";
 import conversationsRouter from "./routes/conversations.js";
 import tasksRouter from "./routes/tasks.js";
+import eventsRouter from "./routes/events.js";
 import { setupWebSocket } from "./ws.js";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -94,6 +95,9 @@ app.use("/api/conversations", conversationsRouter);
 
 // ============= Tasks Route =============
 app.use("/api/tasks", tasksRouter);
+
+// ============= Events Route =============
+app.use("/api/events", eventsRouter);
 
 // ============= 模型列表 =============
 app.get("/api/models", (req, res) => {
