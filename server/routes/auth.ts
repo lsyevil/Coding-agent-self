@@ -100,4 +100,50 @@ router.get('/users', authMiddleware, (req, res) => {
   res.json({ users: users.map(toSafeUser) });
 });
 
+// PATCH /api/auth/users/:id — 更新用户（仅 admin）
+router.patch('/users/:id', authMiddleware, async (req, res) => {
+  const currentUser = (req as any).user as AuthPayload;
+  if (currentUser.role !== 'admin') {
+    return res.status(403).json({ error: '仅管理员可操作' });
+  }
+
+  const user = db.getUser(req.params.id);
+  if (!user) return res.status(404).json({ error: '用户不存在' });
+
+  const { displayName, role, password } = req.body;
+  const updates: any = {};
+  if (displayName !== undefined) updates.display_name = displayName;
+  if (role !== undefined) updates.role = role === 'admin' ? 'admin' : 'member';
+
+  if (Object.keys(updates).length > 0) {
+    db.updateUser(user.id, updates);
+  }
+
+  if (password) {
+    const passwordHash = await hashPassword(password);
+    db.updateUserPassword(user.id, passwordHash);
+  }
+
+  const updated = db.getUser(user.id);
+  res.json({ user: toSafeUser(updated!) });
+});
+
+// DELETE /api/auth/users/:id — 删除用户（仅 admin，不能删自己）
+router.delete('/users/:id', authMiddleware, async (req, res) => {
+  const currentUser = (req as any).user as AuthPayload;
+  if (currentUser.role !== 'admin') {
+    return res.status(403).json({ error: '仅管理员可操作' });
+  }
+
+  if (currentUser.userId === req.params.id) {
+    return res.status(400).json({ error: '不能删除自己' });
+  }
+
+  const user = db.getUser(req.params.id);
+  if (!user) return res.status(404).json({ error: '用户不存在' });
+
+  db.deleteUser(user.id);
+  res.json({ success: true });
+});
+
 export default router;

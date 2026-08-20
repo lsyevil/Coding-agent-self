@@ -57,8 +57,9 @@ export function CalendarView({ events, loading, currentMonth, onMonthChange }: P
   const getEventsForDate = (day: number): CalendarEvent[] => {
     const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
     return events.filter((e) => {
-      const eventDate = e.start_time.slice(0, 10);
-      return eventDate === dateStr;
+      const startDate = e.start_time.slice(0, 10);
+      const endDate = e.end_time.slice(0, 10);
+      return startDate <= dateStr && dateStr <= endDate;
     });
   };
 

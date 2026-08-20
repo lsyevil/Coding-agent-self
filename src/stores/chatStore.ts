@@ -59,8 +59,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
   streamingContent: '',
   streamingToolCalls: [],
 
-  selectedModel: null,
-  currentAgentId: 'default',
+  selectedModel: localStorage.getItem('selectedModel') || null,
+  currentAgentId: localStorage.getItem('currentAgentId') || 'default',
 
   setSelectedModel: (model: string) => {
     set({ selectedModel: model || null });

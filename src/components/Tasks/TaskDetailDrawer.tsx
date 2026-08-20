@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Drawer, Form, Input, Select, DatePicker, Button, Divider, List, Avatar, Typography, Popconfirm, message, theme } from 'antd';
+import { Drawer, Form, Input, Select, DatePicker, Button, Divider, List, Avatar, Typography, Popconfirm, message, theme, Space } from 'antd';
 import { DeleteOutlined, SendOutlined } from '@ant-design/icons';
 import { useTaskStore } from '../../stores/taskStore';
 import { useAuthStore } from '../../stores/authStore';
@@ -138,7 +138,14 @@ export function TaskDetailDrawer() {
             <List.Item>
               <List.Item.Meta
                 avatar={<Avatar size="small">{c.userName?.[0] || '?'}</Avatar>}
-                title={<Text style={{ fontSize: 13 }}>{c.userName}</Text>}
+                title={
+                  <Space>
+                    <Text style={{ fontSize: 13 }}>{c.userName}</Text>
+                    <Text type="secondary" style={{ fontSize: 11 }}>
+                      {new Date(c.created_at).toLocaleString('zh-CN')}
+                    </Text>
+                  </Space>
+                }
                 description={<Text>{c.content}</Text>}
               />
             </List.Item>

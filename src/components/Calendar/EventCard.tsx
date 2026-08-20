@@ -50,6 +50,15 @@ export function EventCard({ event, onClick }: Props) {
       <Text type="secondary" style={{ fontSize: 10 }}>
         {timeStr}
       </Text>
+      {event.participants.length > 0 && (
+        <Avatar.Group size={16} maxCount={3} style={{ marginTop: 4 }}>
+          {event.participants.map((p) => (
+            <Avatar key={p.id} style={{ backgroundColor: token.colorPrimary, fontSize: 10 }}>
+              {p.displayName?.[0] || '?'}
+            </Avatar>
+          ))}
+        </Avatar.Group>
+      )}
     </div>
   );
 }

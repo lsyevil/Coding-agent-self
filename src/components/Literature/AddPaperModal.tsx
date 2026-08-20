@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Modal, Form, Input, InputNumber, Select, message } from 'antd';
+import { Modal, Form, Input, InputNumber, Select, Button, message } from 'antd';
 import { usePaperStore } from '../../stores/paperStore';
 import { apiFetch } from '../../api/http';
 
@@ -123,9 +123,9 @@ export function AddPaperModal({ open, onClose }: Props) {
               onChange={(e) => form.setFieldValue('searchQuery', e.target.value)}
               onPressEnter={handleSearch}
             />
-            <button onClick={handleSearch} disabled={searching} style={{ padding: '4px 16px' }}>
-              {searching ? '搜索中...' : '搜索'}
-            </button>
+            <Button type="primary" onClick={handleSearch} loading={searching}>
+              {'搜索'}
+            </Button>
           </div>
           {results.length > 0 && (
             <div style={{ marginTop: 8, maxHeight: 200, overflowY: 'auto', border: '1px solid #d9d9d9', borderRadius: 6 }}>

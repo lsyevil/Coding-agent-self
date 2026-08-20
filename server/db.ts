@@ -143,6 +143,14 @@ db.exec(`
     PRIMARY KEY (event_id, user_id)
   );
 
+
+  -- ============ 系统配置 ============
+  CREATE TABLE IF NOT EXISTS system_config (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );
+
   -- ============ 文献 ============
   CREATE TABLE IF NOT EXISTS papers (
     id TEXT PRIMARY KEY,
@@ -994,6 +1002,41 @@ export function updatePaperNote(id: string, content: string, userId: string): bo
 
 export function deletePaperNote(id: string, userId: string): boolean {
   return db.prepare('DELETE FROM paper_notes WHERE id = ? AND user_id = ?').run(id, userId).changes > 0;
+}
+
+// ============= 系统配置 =============
+
+export function getSystemConfig(key: string): string | null {
+  const row = db.prepare('SELECT value FROM system_config WHERE key = ?').get(key) as { value: string } | undefined;
+  return row?.value || null;
+}
+
+export function setSystemConfig(key: string, value: string): void {
+  const now = new Date().toISOString();
+  db.prepare('INSERT INTO system_config (key, value, updated_at) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at').run(key, value, now);
+}
+
+// ============= 用户管理扩展 =============
+
+export function updateUser(id: string, updates: Partial<Pick<DbUser, 'display_name' | 'role' | 'avatar'>>): boolean {
+  const fields: string[] = [];
+  const values: any[] = [];
+  for (const [key, val] of Object.entries(updates)) {
+    if (val !== undefined) { fields.push(key + ' = ?'); values.push(val); }
+  }
+  if (fields.length === 0) return false;
+  fields.push('updated_at = ?');
+  values.push(new Date().toISOString());
+  values.push(id);
+  return db.prepare('UPDATE users SET ' + fields.join(', ') + ' WHERE id = ?').run(...values).changes > 0;
+}
+
+export function updateUserPassword(id: string, passwordHash: string): boolean {
+  return db.prepare('UPDATE users SET password_hash = ?, updated_at = ? WHERE id = ?').run(passwordHash, new Date().toISOString(), id).changes > 0;
+}
+
+export function deleteUser(id: string): boolean {
+  return db.prepare('DELETE FROM users WHERE id = ?').run(id).changes > 0;
 }
 
 export default db;
