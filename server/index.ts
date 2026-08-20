@@ -13,6 +13,7 @@ import settingsRouter from "./routes/settings.js";
 import conversationsRouter from "./routes/conversations.js";
 import tasksRouter from "./routes/tasks.js";
 import eventsRouter from "./routes/events.js";
+import papersRouter from "./routes/papers.js";
 import { setupWebSocket } from "./ws.js";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -98,6 +99,7 @@ app.use("/api/tasks", tasksRouter);
 
 // ============= Events Route =============
 app.use("/api/events", eventsRouter);
+app.use("/api/papers", papersRouter);
 
 // ============= 模型列表 =============
 app.get("/api/models", (req, res) => {

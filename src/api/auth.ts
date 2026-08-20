@@ -1,5 +1,4 @@
 import { apiFetch } from './http';
-import { setToken } from './http';
 import type { AuthUser } from '../stores/authStore';
 
 export interface LoginResult {

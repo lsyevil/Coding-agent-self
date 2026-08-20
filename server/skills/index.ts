@@ -3,6 +3,7 @@ import { loadConfig } from './config.js';
 import { codingSkill } from './coding/index.js';
 import { todoSkill } from './todo/index.js';
 import { calendarSkill } from './calendar/index.js';
+import { literatureSkill } from './literature/index.js';
 
 /**
  * 注册所有内置 Skill，并按配置设置启用状态。
@@ -13,6 +14,7 @@ export function registerBuiltinSkills(): void {
   skillRegistry.register(codingSkill);
   skillRegistry.register(todoSkill);
   skillRegistry.register(calendarSkill);
+  skillRegistry.register(literatureSkill);
 
   // 应用配置中的启用/禁用状态（仅对已注册的 Skill 生效）
   const config = loadConfig();
