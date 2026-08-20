@@ -1,6 +1,7 @@
 import { skillRegistry } from './registry.js';
 import { loadConfig } from './config.js';
 import { codingSkill } from './coding/index.js';
+import { todoSkill } from './todo/index.js';
 
 /**
  * 注册所有内置 Skill，并按配置设置启用状态。
@@ -9,6 +10,7 @@ import { codingSkill } from './coding/index.js';
 export function registerBuiltinSkills(): void {
   // 注册内置 Skill（各 Phase 实现的 Skill 在此登记）
   skillRegistry.register(codingSkill);
+  skillRegistry.register(todoSkill);
 
   // 应用配置中的启用/禁用状态（仅对已注册的 Skill 生效）
   const config = loadConfig();
@@ -24,7 +26,7 @@ export function registerBuiltinSkills(): void {
 
   console.log(
     '[SkillRegistry] 已加载 Skill:',
-    skillRegistry.listSkills().map((s) => `${s.name}${s.enabled ? '' : '(off)'}`).join(', ')
+    skillRegistry.listSkills().map((s) => s.name + (s.enabled ? '' : '(off)')).join(', ')
   );
 }
 

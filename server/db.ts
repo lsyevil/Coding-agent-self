@@ -611,4 +611,147 @@ export function getUnreadCount(conversationId: string, userId: string): number {
   return row.count;
 }
 
+// ============= 待办操作 =============
+
+export interface DbTask {
+  id: string;
+  title: string;
+  description: string | null;
+  status: 'todo' | 'in_progress' | 'done' | 'blocked';
+  priority: 'low' | 'medium' | 'high' | 'urgent';
+  due_date: string | null;
+  created_by: string;
+  conversation_id: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface DbTaskAssignee {
+  task_id: string;
+  user_id: string;
+  role: 'owner' | 'collaborator';
+  assigned_at: string;
+}
+
+export interface DbTaskComment {
+  id: string;
+  task_id: string;
+  user_id: string;
+  content: string;
+  created_at: string;
+}
+
+/** 获取任务列表（支持状态筛选） */
+export function getTasks(filter?: { status?: string; assigneeId?: string }): DbTask[] {
+  let sql = `
+    SELECT DISTINCT t.* FROM tasks t
+    LEFT JOIN task_assignees ta ON ta.task_id = t.id
+  `;
+  const conditions: string[] = [];
+  const params: any[] = [];
+
+  if (filter?.status) {
+    conditions.push('t.status = ?');
+    params.push(filter.status);
+  }
+  if (filter?.assigneeId) {
+    conditions.push('ta.user_id = ?');
+    params.push(filter.assigneeId);
+  }
+
+  if (conditions.length > 0) {
+    sql += ' WHERE ' + conditions.join(' AND ');
+  }
+  sql += ' ORDER BY t.created_at DESC';
+
+  return db.prepare(sql).all(...params) as DbTask[];
+}
+
+/** 获取任务详情 */
+export function getTask(id: string): DbTask | undefined {
+  return db.prepare('SELECT * FROM tasks WHERE id = ?').get(id) as DbTask | undefined;
+}
+
+/** 创建任务 */
+export function createTask(task: DbTask): DbTask {
+  db.prepare(`
+    INSERT INTO tasks (id, title, description, status, priority, due_date, created_by, conversation_id, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    task.id, task.title, task.description, task.status, task.priority,
+    task.due_date, task.created_by, task.conversation_id, task.created_at, task.updated_at
+  );
+  return task;
+}
+
+/** 更新任务 */
+export function updateTask(id: string, updates: Partial<Pick<DbTask, 'title' | 'description' | 'status' | 'priority' | 'due_date'>>): boolean {
+  const fields: string[] = [];
+  const values: any[] = [];
+
+  for (const [key, val] of Object.entries(updates)) {
+    if (val !== undefined) {
+      fields.push(`${key} = ?`);
+      values.push(val);
+    }
+  }
+
+  if (fields.length === 0) return false;
+
+  fields.push('updated_at = ?');
+  values.push(new Date().toISOString());
+  values.push(id);
+
+  const stmt = db.prepare(`UPDATE tasks SET ${fields.join(', ')} WHERE id = ?`);
+  return stmt.run(...values).changes > 0;
+}
+
+/** 删除任务 */
+export function deleteTask(id: string): boolean {
+  return db.prepare('DELETE FROM tasks WHERE id = ?').run(id).changes > 0;
+}
+
+/** 获取任务的负责人列表 */
+export function getTaskAssignees(taskId: string): DbUser[] {
+  return db.prepare(`
+    SELECT u.* FROM users u
+    JOIN task_assignees ta ON ta.user_id = u.id
+    WHERE ta.task_id = ?
+  `).all(taskId) as DbUser[];
+}
+
+/** 添加任务负责人 */
+export function addTaskAssignee(taskId: string, userId: string, role: 'owner' | 'collaborator'): void {
+  db.prepare(`
+    INSERT OR IGNORE INTO task_assignees (task_id, user_id, role, assigned_at)
+    VALUES (?, ?, ?, ?)
+  `).run(taskId, userId, role, new Date().toISOString());
+}
+
+/** 移除任务负责人 */
+export function removeTaskAssignee(taskId: string, userId: string): void {
+  db.prepare('DELETE FROM task_assignees WHERE task_id = ? AND user_id = ?').run(taskId, userId);
+}
+
+/** 获取任务评论 */
+export function getTaskComments(taskId: string): DbTaskComment[] {
+  return db.prepare(`
+    SELECT * FROM task_comments WHERE task_id = ? ORDER BY created_at ASC
+  `).all(taskId) as DbTaskComment[];
+}
+
+/** 添加评论 */
+export function addTaskComment(comment: DbTaskComment): DbTaskComment {
+  db.prepare(`
+    INSERT INTO task_comments (id, task_id, user_id, content, created_at)
+    VALUES (?, ?, ?, ?, ?)
+  `).run(comment.id, comment.task_id, comment.user_id, comment.content, comment.created_at);
+  return comment;
+}
+
+/** 删除评论（只能删除自己的） */
+export function deleteTaskComment(id: string, userId: string): boolean {
+  return db.prepare('DELETE FROM task_comments WHERE id = ? AND user_id = ?').run(id, userId).changes > 0;
+}
+
 export default db;
