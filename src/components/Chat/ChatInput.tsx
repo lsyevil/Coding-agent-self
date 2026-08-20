@@ -2,8 +2,8 @@ import { Input, Button, Space, Select, Segmented } from 'antd';
 import { SendOutlined, StopOutlined } from '@ant-design/icons';
 import { useState, KeyboardEvent } from 'react';
 import { useChatStore } from '../../stores/chatStore';
-import { useModels } from '../../hooks/useModels';
-import { DEFAULT_AGENTS } from '../../config/agents';
+import { useAvailableModels } from '../../hooks/useAvailableModels';
+import { useAvailableAgents } from '../../hooks/useAvailableAgents';
 
 const { TextArea } = Input;
 
@@ -18,7 +18,8 @@ export function ChatInput() {
     currentAgentId,
     setCurrentAgent,
   } = useChatStore();
-  const { models, defaultModel, loading } = useModels();
+  const { models, loading } = useAvailableModels();
+  const { agents } = useAvailableAgents();
 
   const handleSend = async () => {
     if (!value.trim() || isLoading) return;
@@ -33,7 +34,7 @@ export function ChatInput() {
     }
   };
 
-  const agentOptions = DEFAULT_AGENTS.map((a) => ({
+  const agentOptions = agents.map((a) => ({
     label: `${a.icon} ${a.name}`,
     value: a.id,
   }));
@@ -53,7 +54,7 @@ export function ChatInput() {
           />
           <Select
             size="small"
-            value={selectedModel ?? (defaultModel || undefined)}
+            value={selectedModel ?? (models[0]?.modelId || undefined)}
             onChange={(val) => setSelectedModel(val)}
             disabled={models.length <= 1}
             loading={loading}

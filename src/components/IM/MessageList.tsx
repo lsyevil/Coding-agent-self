@@ -63,7 +63,7 @@ export function MessageList({ conversationId, messages, loading }: Props) {
           <Empty description="暂无消息，开始聊天吧" />
         </div>
         <div style={{ padding: 12, borderTop: '1px solid #f0f0f0', textAlign: 'center' }}>
-          <Button icon={<RobotOutlined />} onClick={handleSummarize} loading={summarizing}>
+          <Button icon={<RobotOutlined />} onClick={handleSummarize} loading={summarizing} disabled>
             AI 总结
           </Button>
         </div>
@@ -126,7 +126,7 @@ export function MessageList({ conversationId, messages, loading }: Props) {
       </div>
 
       <div style={{ padding: 12, borderTop: '1px solid #f0f0f0', textAlign: 'center' }}>
-        <Button icon={<RobotOutlined />} onClick={handleSummarize} loading={summarizing}>
+        <Button icon={<RobotOutlined />} onClick={handleSummarize} loading={summarizing} disabled={messages.length === 0}>
           AI 总结
         </Button>
       </div>

@@ -3,6 +3,7 @@ import { Tabs, Table, Switch, Empty, message } from 'antd';
 import { useAuthStore } from '../stores/authStore';
 import { apiFetch } from '../api/http';
 import { UserManagement } from '../components/Settings/UserManagement';
+import { PermissionConfig } from '../components/Settings/PermissionConfig';
 
 interface Skill {
   name: string;
@@ -119,6 +120,11 @@ export function SettingsPage() {
             key: 'user',
             label: '用户管理',
             children: <UserManagement />,
+          },
+          {
+            key: 'permission',
+            label: '权限配置',
+            children: <PermissionConfig />,
           },
         ]
       : []),
