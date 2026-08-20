@@ -128,8 +128,17 @@ router.delete('/:id', (req, res) => {
 
 // POST /api/tasks/:id/assign — 添加负责人
 router.post('/:id/assign', (req, res) => {
+  const user = (req as any).user as AuthPayload;
   const task = db.getTask(req.params.id);
   if (!task) return res.status(404).json({ error: '任务不存在' });
+
+  // 权限检查：只有创建者或现有负责人可以添加新负责人
+  const assignees = db.getTaskAssignees(task.id);
+  const isCreator = task.created_by === user.userId;
+  const isAssignee = assignees.some((a) => a.id === user.userId);
+  if (!isCreator && !isAssignee) {
+    return res.status(403).json({ error: '无权修改此任务的负责人' });
+  }
 
   const { userIds } = req.body;
   if (!Array.isArray(userIds)) {
