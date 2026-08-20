@@ -6,6 +6,7 @@ import { LoginPage } from './pages/LoginPage';
 import { ChatPage } from './pages/ChatPage';
 import { ComingSoon } from './pages/ComingSoon';
 import { SettingsPage } from './pages/SettingsPage';
+import { IMPage } from './pages/IMPage';
 import { ProtectedRoute } from './components/ProtectedRoute';
 
 function App() {
@@ -25,7 +26,8 @@ function App() {
             <Route index element={<Navigate to="/chat" replace />} />
             <Route path="chat" element={<ChatPage />} />
             <Route path="chat/:sessionId" element={<ChatPage />} />
-            <Route path="im" element={<ComingSoon title="IM 会话" />} />
+            <Route path="im" element={<IMPage />} />
+            <Route path="im/:conversationId" element={<IMPage />} />
             <Route path="tasks" element={<ComingSoon title="待办" />} />
             <Route path="calendar" element={<ComingSoon title="日程" />} />
             <Route path="literature" element={<ComingSoon title="文献" />} />

@@ -1,4 +1,5 @@
 import express from "express";
+import { createServer } from "http";
 import { v4 as uuidv4 } from "uuid";
 import path from "path";
 import { fileURLToPath } from "url";
@@ -9,12 +10,14 @@ import { authMiddleware } from "./auth.js";
 import authRouter from "./routes/auth.js";
 import { registerBuiltinSkills } from "./skills/index.js";
 import settingsRouter from "./routes/settings.js";
+import conversationsRouter from "./routes/conversations.js";
+import { setupWebSocket } from "./ws.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app = express();
-const PORT = process.env.PORT || 3000;
+const PORT = Number(process.env.PORT) || 3000;
 
 // 启动时注册内置 Skill（工具定义与执行改由注册表动态提供）
 registerBuiltinSkills();
@@ -85,6 +88,9 @@ app.use("/api/auth", authRouter);
 // ============= 设置路由 =============
 app.use("/api/settings", settingsRouter);
 
+// ============= IM 会话路由 =============
+app.use("/api/conversations", conversationsRouter);
+
 // ============= 模型列表 =============
 app.get("/api/models", (req, res) => {
   const model = process.env.OPENAI_MODEL || "";
@@ -146,6 +152,7 @@ app.post("/api/sessions", (req, res) => {
       title,
       model,
       owner_id: (req as any).user?.userId,
+      sdk_session_id: null,
       created_at: now,
       updated_at: now,
     });
@@ -242,6 +249,7 @@ app.post("/api/chat", async (req, res) => {
       title: message.slice(0, 30) + (message.length > 30 ? "..." : ""),
       model: model || process.env.OPENAI_MODEL || "unknown",
       owner_id: (req as any).user?.userId || "system",
+      sdk_session_id: null,
       created_at: now,
       updated_at: now,
     });
@@ -426,7 +434,14 @@ if (fs.existsSync(distDir)) {
 }
 
 app.set("trust proxy", true);
-app.listen(PORT, "0.0.0.0", () => {
+
+// ============= WebSocket（IM 实时通信）=============
+const httpServer = createServer(app);
+const io = setupWebSocket(httpServer);
+// 把 io 实例挂到 app 上，供 REST 路由广播使用
+app.set("io", io);
+
+httpServer.listen(PORT, "0.0.0.0", () => {
   console.log(`
 ╔════════════════════════════════════════════╗
 ║                                            ║
@@ -435,6 +450,7 @@ app.listen(PORT, "0.0.0.0", () => {
 ║     地址: http://0.0.0.0:${PORT}              ║
 ║     数据库: SQLite (data/chat.db)          ║
 ║     默认工作目录: ${process.env.DEFAULT_CWD || process.cwd()} ║
+║     WebSocket: /ws                         ║
 ║                                            ║
 ╚════════════════════════════════════════════╝
   `);

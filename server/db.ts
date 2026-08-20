@@ -435,4 +435,180 @@ export function clearAllData(): void {
   db.exec('DELETE FROM sessions');
 }
 
+// ============= IM 会话操作 =============
+
+export interface DbConversation {
+  id: string;
+  title: string | null;
+  type: 'private' | 'group';
+  created_by: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface DbConversationMember {
+  conversation_id: string;
+  user_id: string;
+  joined_at: string;
+  last_read_at: string | null;
+}
+
+export interface DbImMessage {
+  id: string;
+  conversation_id: string;
+  sender_id: string;
+  content: string;
+  created_at: string;
+}
+
+/** 获取用户所在的所有会话 */
+export function getConversationsByUserId(userId: string): DbConversation[] {
+  return db.prepare(`
+    SELECT c.* FROM conversations c
+    JOIN conversation_members cm ON cm.conversation_id = c.id
+    WHERE cm.user_id = ?
+    ORDER BY c.updated_at DESC
+  `).all(userId) as DbConversation[];
+}
+
+/** 获取会话详情 */
+export function getConversation(id: string): DbConversation | undefined {
+  return db.prepare('SELECT * FROM conversations WHERE id = ?').get(id) as DbConversation | undefined;
+}
+
+/** 检查用户是否是会话成员 */
+export function isConversationMember(conversationId: string, userId: string): boolean {
+  const row = db.prepare(
+    'SELECT 1 FROM conversation_members WHERE conversation_id = ? AND user_id = ?'
+  ).get(conversationId, userId);
+  return !!row;
+}
+
+/** 创建会话 + 添加成员（事务） */
+export function createConversation(params: {
+  id: string;
+  title: string | null;
+  type: 'private' | 'group';
+  created_by: string;
+  member_ids: string[];
+  created_at: string;
+}): DbConversation {
+  const insert = db.transaction(() => {
+    db.prepare(`
+      INSERT INTO conversations (id, title, type, created_by, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `).run(params.id, params.title, params.type, params.created_by, params.created_at, params.created_at);
+
+    for (const uid of params.member_ids) {
+      db.prepare(`
+        INSERT INTO conversation_members (conversation_id, user_id, joined_at)
+        VALUES (?, ?, ?)
+      `).run(params.id, uid, params.created_at);
+    }
+  });
+  insert();
+  return getConversation(params.id)!;
+}
+
+/** 获取会话成员列表 */
+export function getConversationMembers(conversationId: string): DbUser[] {
+  return db.prepare(`
+    SELECT u.* FROM users u
+    JOIN conversation_members cm ON cm.user_id = u.id
+    WHERE cm.conversation_id = ?
+  `).all(conversationId) as DbUser[];
+}
+
+/** 添加成员到会话 */
+export function addConversationMember(conversationId: string, userId: string): void {
+  db.prepare(`
+    INSERT OR IGNORE INTO conversation_members (conversation_id, user_id, joined_at)
+    VALUES (?, ?, ?)
+  `).run(conversationId, userId, new Date().toISOString());
+}
+
+/** 移除成员 */
+export function removeConversationMember(conversationId: string, userId: string): void {
+  db.prepare(
+    'DELETE FROM conversation_members WHERE conversation_id = ? AND user_id = ?'
+  ).run(conversationId, userId);
+}
+
+/** 查找两人私聊会话（不存在返回 undefined） */
+export function findPrivateConversation(userA: string, userB: string): DbConversation | undefined {
+  return db.prepare(`
+    SELECT c.* FROM conversations c
+    WHERE c.type = 'private'
+      AND c.id IN (SELECT conversation_id FROM conversation_members WHERE user_id = ?)
+      AND c.id IN (SELECT conversation_id FROM conversation_members WHERE user_id = ?)
+  `).get(userA, userB) as DbConversation | undefined;
+}
+
+// ============= IM 消息操作 =============
+
+/** 获取会话消息（分页，按时间升序返回） */
+export function getImMessages(conversationId: string, limit: number = 50, before?: string): DbImMessage[] {
+  if (before) {
+    return db.prepare(`
+      SELECT * FROM im_messages
+      WHERE conversation_id = ? AND created_at < ?
+      ORDER BY created_at DESC
+      LIMIT ?
+    `).all(conversationId, before, limit).reverse() as DbImMessage[];
+  }
+  return db.prepare(`
+    SELECT * FROM im_messages
+    WHERE conversation_id = ?
+    ORDER BY created_at DESC
+    LIMIT ?
+  `).all(conversationId, limit).reverse() as DbImMessage[];
+}
+
+/** 创建 IM 消息 */
+export function createImMessage(msg: {
+  id: string;
+  conversation_id: string;
+  sender_id: string;
+  content: string;
+  created_at: string;
+}): DbImMessage {
+  db.prepare(`
+    INSERT INTO im_messages (id, conversation_id, sender_id, content, created_at)
+    VALUES (?, ?, ?, ?, ?)
+  `).run(msg.id, msg.conversation_id, msg.sender_id, msg.content, msg.created_at);
+
+  // 更新会话的 updated_at
+  db.prepare('UPDATE conversations SET updated_at = ? WHERE id = ?')
+    .run(msg.created_at, msg.conversation_id);
+
+  return msg as DbImMessage;
+}
+
+/** 更新已读时间 */
+export function updateLastReadAt(conversationId: string, userId: string): void {
+  db.prepare(`
+    UPDATE conversation_members SET last_read_at = ?
+    WHERE conversation_id = ? AND user_id = ?
+  `).run(new Date().toISOString(), conversationId, userId);
+}
+
+/** 获取会话未读消息数 */
+export function getUnreadCount(conversationId: string, userId: string): number {
+  const member = db.prepare(
+    'SELECT last_read_at FROM conversation_members WHERE conversation_id = ? AND user_id = ?'
+  ).get(conversationId, userId) as { last_read_at: string | null } | undefined;
+
+  if (!member || !member.last_read_at) {
+    const row = db.prepare(
+      'SELECT COUNT(*) as count FROM im_messages WHERE conversation_id = ?'
+    ).get(conversationId) as { count: number };
+    return row.count;
+  }
+
+  const row = db.prepare(
+    'SELECT COUNT(*) as count FROM im_messages WHERE conversation_id = ? AND created_at > ?'
+  ).get(conversationId, member.last_read_at) as { count: number };
+  return row.count;
+}
+
 export default db;

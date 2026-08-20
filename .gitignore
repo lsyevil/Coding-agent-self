@@ -26,3 +26,10 @@ Thumbs.db
 
 # Vite 缓存
 .vite
+
+# tsc -b 生成的编译产物（server 由 tsx 直接运行 .ts，无需产物）
+*.tsbuildinfo
+server/**/*.js
+server/**/*.d.ts
+vite.config.js
+vite.config.d.ts
