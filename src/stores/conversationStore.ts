@@ -77,7 +77,12 @@ export const useConversationStore = create<ConvState>((set, get) => ({
       set({ loadingMessages: false });
     }
 
-    // 标记已读
+    // 标记已读 + 重置本地未读数
+    set((state) => ({
+      conversations: state.conversations.map((conv) =>
+        conv.id === id ? { ...conv, unreadCount: 0 } : conv
+      ),
+    }));
     get().markRead(id);
   },
 
@@ -92,12 +97,23 @@ export const useConversationStore = create<ConvState>((set, get) => ({
   },
 
   addMessage: (msg) => {
-    const state = get();
-    if (msg.conversation_id === state.currentConvId) {
-      set({ messages: [...state.messages, msg] });
-    }
-    // 更新会话列表的未读数/预览
-    get().fetchConversations();
+    set((state) => {
+      const isCurrent = msg.conversation_id === state.currentConvId;
+      const newMessages = isCurrent ? [...state.messages, msg] : state.messages;
+
+      // 局部更新会话列表：lastMessage / lastMessageAt / unreadCount
+      const newConversations = state.conversations.map((conv) => {
+        if (conv.id !== msg.conversation_id) return conv;
+        return {
+          ...conv,
+          lastMessage: msg.content,
+          lastMessageAt: msg.created_at,
+          unreadCount: isCurrent ? conv.unreadCount : conv.unreadCount + 1,
+        };
+      });
+
+      return { messages: newMessages, conversations: newConversations };
+    });
   },
 
   markRead: async (id) => {

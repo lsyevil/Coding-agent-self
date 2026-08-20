@@ -31,7 +31,24 @@ export function useWebSocket() {
       addMessage(msg);
     });
 
+    // 被拉入新会话时刷新列表
+    socket.on('conv:added', () => {
+      useConversationStore.getState().fetchConversations();
+    });
+
+    // 连接错误处理：token 过期或无效时引导重新登录
+    socket.on('connect_error', (err) => {
+      console.error('[WebSocket] 连接错误:', err.message);
+      if (err.message === 'Token 无效' || err.message === '未认证') {
+        useAuthStore.getState().logout();
+        window.location.href = '/login';
+      }
+    });
+
     return () => {
+      socket.off('im:message');
+      socket.off('conv:added');
+      socket.off('connect_error');
       socket.disconnect();
       socketRef.current = null;
     };
