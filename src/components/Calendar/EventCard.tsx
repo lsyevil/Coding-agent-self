@@ -1,5 +1,6 @@
 import { Tag, Avatar, Typography, theme } from 'antd';
 import type { CalendarEvent } from '../../stores/eventStore';
+import { useAuthStore } from '../../stores/authStore';
 
 const { Text } = Typography;
 
@@ -26,7 +27,8 @@ export function EventCard({ event, onClick }: Props) {
     : `${startTime.getHours().toString().padStart(2, '0')}:${startTime.getMinutes().toString().padStart(2, '0')} - ${endTime.getHours().toString().padStart(2, '0')}:${endTime.getMinutes().toString().padStart(2, '0')}`;
 
   // 获取当前用户的状态
-  const myParticipant = event.participants.find(p => p.id === localStorage.getItem('userId'));
+  const currentUserId = useAuthStore((s) => s.user?.id);
+  const myParticipant = event.participants.find(p => p.id === currentUserId);
   const statusColor = myParticipant ? STATUS_COLORS[myParticipant.status] : token.colorPrimary;
 
   return (

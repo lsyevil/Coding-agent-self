@@ -90,6 +90,31 @@ router.post('/', (req, res) => {
   });
 });
 
+// GET /api/events/availability/check — 检查用户空闲状态
+router.get('/availability/check', (req, res) => {
+  const { userId, start, end } = req.query;
+
+  if (!userId || !start || !end) {
+    return res.status(400).json({ error: '缺少 userId、start、end 参数' });
+  }
+
+  const availability = db.getUserAvailability(
+    userId as string,
+    start as string,
+    end as string
+  );
+
+  res.json({
+    busy: availability.busy,
+    events: availability.events.map((e) => ({
+      id: e.id,
+      title: e.title,
+      start_time: e.start_time,
+      end_time: e.end_time,
+    })),
+  });
+});
+
 // GET /api/events/:id — 日程详情
 router.get('/:id', (req, res) => {
   const event = db.getEvent(req.params.id);
@@ -211,31 +236,6 @@ router.patch('/:id/rsvp', (req, res) => {
   }
 
   res.json({ success: true });
-});
-
-// GET /api/events/availability/check — 检查用户空闲状态
-router.get('/availability/check', (req, res) => {
-  const { userId, start, end } = req.query;
-
-  if (!userId || !start || !end) {
-    return res.status(400).json({ error: '缺少 userId、start、end 参数' });
-  }
-
-  const availability = db.getUserAvailability(
-    userId as string,
-    start as string,
-    end as string
-  );
-
-  res.json({
-    busy: availability.busy,
-    events: availability.events.map((e) => ({
-      id: e.id,
-      title: e.title,
-      start_time: e.start_time,
-      end_time: e.end_time,
-    })),
-  });
 });
 
 export default router;
