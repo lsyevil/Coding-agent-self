@@ -79,18 +79,18 @@ export class LiteratureSkill implements Skill {
       const response = await fetch(url);
       const text = await response.text();
       const entries: any[] = [];
-      const entryRegex = /<entry>([\s\S]*?)</entry>/g;
+      const entryRegex = /<entry>([\s\S]*?)<\/entry>/g;
       let match;
       while ((match = entryRegex.exec(text)) !== null && entries.length < maxResults) {
         const entry = match[1];
-        const title = entry.match(/<title>([\s\S]*?)</title>/)?.[1]?.replace(/\n/g, ' ').trim() || '';
+        const title = entry.match(/<title>([\s\S]*?)<\/title>/)?.[1]?.replace(/\n/g, ' ').trim() || '';
         const authors: string[] = [];
-        const authorRegex = /<name>([\s\S]*?)</name>/g;
+        const authorRegex = /<name>([\s\S]*?)<\/name>/g;
         let am;
         while ((am = authorRegex.exec(entry)) !== null) authors.push(am[1].trim());
-        const summary = entry.match(/<summary>([\s\S]*?)</summary>/)?.[1]?.replace(/\n/g, ' ').trim() || '';
-        const link = entry.match(/<id>([\s\S]*?)</id>/)?.[1]?.trim() || '';
-        const published = entry.match(/<published>([\s\S]*?)</published>/)?.[1]?.trim();
+        const summary = entry.match(/<summary>([\s\S]*?)<\/summary>/)?.[1]?.replace(/\n/g, ' ').trim() || '';
+        const link = entry.match(/<id>([\s\S]*?)<\/id>/)?.[1]?.trim() || '';
+        const published = entry.match(/<published>([\s\S]*?)<\/published>/)?.[1]?.trim();
         const year = published ? new Date(published).getFullYear() : null;
         entries.push({ title, authors: authors.slice(0, 3).join(', ') + (authors.length > 3 ? ' et al.' : ''), year, link, abstract: summary.slice(0, 200) + '...' });
       }
