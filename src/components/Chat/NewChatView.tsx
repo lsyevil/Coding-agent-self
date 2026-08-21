@@ -16,6 +16,12 @@ interface QuickAction {
   prompt: string;
 }
 
+const WELCOME: Record<string, { title: string; desc: string }> = {
+  default: { title: '你好，我是办公助手 👋', desc: '{welcome.desc}' },
+  research: { title: '你好，我是科研助手 📚', desc: '我可以帮助你检索文献、撰写综述、设计研究方案、润色论文' },
+  writing: { title: '你好，我是写作助手 ✍️', desc: '我可以帮助你撰写报告、润色文档、翻译内容、调整格式' },
+};
+
 const QUICK_ACTIONS: Record<string, QuickAction[]> = {
   default: [
     { icon: <FileTextOutlined style={{ fontSize: 24, color: '#1677ff' }} />, title: '帮我写周报', desc: '整理本周工作内容，生成周报', prompt: '帮我写一份本周的工作周报，主要内容包括：' },
@@ -46,12 +52,13 @@ export function NewChatView() {
     value: a.id,
   }));
 
+  const welcome = WELCOME[currentAgentId] || WELCOME.default;
   const actions = QUICK_ACTIONS[currentAgentId] || QUICK_ACTIONS['default'];
 
   return (
     <div style={{ padding: 32, maxWidth: 800, margin: '0 auto' }}>
       <div style={{ textAlign: 'center', marginBottom: 24 }}>
-        <Title level={2}>你好，我是办公助手 👋</Title>
+        <Title level={2}>{welcome.title}</Title>
         <Paragraph type="secondary">
           我可以帮助你处理文档、管理日程、检索文献、分配任务等日常工作
         </Paragraph>

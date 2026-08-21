@@ -22,7 +22,7 @@ export function ChatInput() {
 
   useEffect(() => {
     if (pendingPrompt) {
-      setValue((prev) => (prev ? prev + ' ' + pendingPrompt : pendingPrompt));
+      setValue(pendingPrompt);
       setPendingPrompt(null);
       textAreaRef.current?.focus();
     }
