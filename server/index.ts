@@ -5,7 +5,7 @@ import path from "path";
 import { fileURLToPath } from "url";
 import fs from "fs";
 import * as db from "./db.js";
-import { runCodingAgent, PermissionResult } from "./agent.js";
+import { runCodingAgent, cancelAgent, PermissionResult } from "./agent.js";
 import { authMiddleware } from "./auth.js";
 import authRouter from "./routes/auth.js";
 import { registerBuiltinSkills } from "./skills/index.js";
@@ -230,6 +230,20 @@ app.post("/api/permission-response", (req, res) => {
   res.json({ success: true });
 });
 
+// ============= SSE Heartbeat =============
+function startHeartbeat(res: any) {
+  const interval = setInterval(() => {
+    res.write(': heartbeat\n\n');
+  }, 30000);
+  res.on('close', () => clearInterval(interval));
+}
+
+// ============= Cancel Agent =============
+app.post("/api/chat/:sessionId/cancel", authMiddleware, (req, res) => {
+  cancelAgent(req.params.sessionId);
+  res.json({ success: true });
+});
+
 app.post("/api/chat", async (req, res) => {
   const { sessionId, message, model, systemPrompt, cwd, permissionMode } = req.body;
 
@@ -292,6 +306,9 @@ app.post("/api/chat", async (req, res) => {
   res.setHeader("Connection", "keep-alive");
 
   const emit = (obj: Record<string, unknown>) => res.write(`data: ${JSON.stringify(obj)}\n\n`);
+  
+  // Start heartbeat
+  startHeartbeat(res);
 
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) {

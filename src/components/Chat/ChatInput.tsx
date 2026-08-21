@@ -3,6 +3,7 @@ import { SendOutlined, StopOutlined } from '@ant-design/icons';
 import { useState, KeyboardEvent, useRef, useEffect } from 'react';
 import { useChatStore } from '../../stores/chatStore';
 import { useAvailableModels } from '../../hooks/useAvailableModels';
+import { apiFetch } from '../../api/http';
 
 const { TextArea } = Input;
 
@@ -17,6 +18,7 @@ export function ChatInput() {
     setSelectedModel,
     pendingPrompt,
     setPendingPrompt,
+    currentSessionId,
   } = useChatStore();
   const { models, loading } = useAvailableModels();
 
@@ -39,6 +41,13 @@ export function ChatInput() {
       e.preventDefault();
       handleSend();
     }
+  };
+
+  const handleStop = async () => {
+    if (currentSessionId) {
+      await apiFetch(`/api/chat/${currentSessionId}/cancel`, { method: 'POST' });
+    }
+    stopGeneration();
   };
 
   const modelOptions = models.map((m) => ({ label: m.name, value: m.modelId }));
@@ -70,7 +79,7 @@ export function ChatInput() {
         />
         <Space>
           {isLoading ? (
-            <Button icon={<StopOutlined />} onClick={stopGeneration} danger>
+            <Button icon={<StopOutlined />} onClick={handleStop} danger>
               停止
             </Button>
           ) : (
