@@ -113,7 +113,12 @@ router.patch('/users/:id', authMiddleware, async (req, res) => {
   const { displayName, role, password } = req.body;
   const updates: any = {};
   if (displayName !== undefined) updates.display_name = displayName;
-  if (role !== undefined) updates.role = role === 'admin' ? 'admin' : 'member';
+  if (role !== undefined) {
+    if (role !== 'admin' && role !== 'member') {
+      return res.status(400).json({ error: 'role \u5fc5\u987b\u662f admin \u6216 member' });
+    }
+    updates.role = role;
+  }
 
   if (Object.keys(updates).length > 0) {
     db.updateUser(user.id, updates);
@@ -142,6 +147,8 @@ router.delete('/users/:id', authMiddleware, async (req, res) => {
   const user = db.getUser(req.params.id);
   if (!user) return res.status(404).json({ error: '用户不存在' });
 
+  db.cleanupUserData(user.id);
+  // Cascade cleanup done
   db.deleteUser(user.id);
   res.json({ success: true });
 });

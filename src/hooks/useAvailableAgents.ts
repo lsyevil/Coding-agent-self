@@ -20,7 +20,7 @@ export function useAvailableAgents() {
         if (!mounted) return;
         setAgents(data.agents || []);
       })
-      .catch(() => {})
+      .catch((err) => { console.warn('Failed to load agents:', err); })
       .finally(() => { if (mounted) setLoading(false); });
     return () => { mounted = false; };
   }, []);

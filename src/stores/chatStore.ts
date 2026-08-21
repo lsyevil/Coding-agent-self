@@ -63,13 +63,14 @@ export const useChatStore = create<ChatState>((set, get) => ({
   currentAgentId: localStorage.getItem('currentAgentId') || 'default',
 
   setSelectedModel: (model: string) => {
-    localStorage.setItem('selectedModel', model || '');
     set({ selectedModel: model || null });
+    if (model) localStorage.setItem('selectedModel', model);
+    else localStorage.removeItem('selectedModel');
   },
 
   setCurrentAgent: (agentId: string) => {
-    localStorage.setItem('currentAgentId', agentId);
     set({ currentAgentId: agentId });
+    localStorage.setItem('currentAgentId', agentId);
   },
 
   fetchSessions: async () => {

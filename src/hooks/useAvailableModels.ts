@@ -19,7 +19,7 @@ export function useAvailableModels() {
         if (!mounted) return;
         setModels(data.models || []);
       })
-      .catch(() => {})
+      .catch((err) => { console.warn('Failed to load models:', err); })
       .finally(() => { if (mounted) setLoading(false); });
     return () => { mounted = false; };
   }, []);

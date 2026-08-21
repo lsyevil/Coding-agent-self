@@ -36,7 +36,7 @@ export function PermissionConfig() {
     try {
       await apiFetch('/api/settings/member-models', {
         method: 'PATCH',
-        body: JSON.stringify({ models: memberModels || [] }),
+        body: JSON.stringify({ models: memberModels }),
       });
       message.success('模型配置已保存');
     } catch { message.error('保存失败'); }
@@ -48,7 +48,7 @@ export function PermissionConfig() {
     try {
       await apiFetch('/api/settings/member-agents', {
         method: 'PATCH',
-        body: JSON.stringify({ agents: memberAgents || [] }),
+        body: JSON.stringify({ agents: memberAgents }),
       });
       message.success('助手配置已保存');
     } catch { message.error('保存失败'); }
@@ -64,8 +64,11 @@ export function PermissionConfig() {
         {'未选择表示成员可使用所有模型'}
       </Text>
       <Checkbox.Group
-        value={memberModels || []}
-        onChange={(vals) => setMemberModels(vals as string[])}
+        value={memberModels === null ? allModels.map(m => m.modelId) : memberModels}
+        onChange={(vals) => {
+          const v = vals as string[];
+          setMemberModels(v.length === allModels.length ? null : v);
+        }}
         options={allModels.map(m => ({ label: m.name, value: m.modelId }))}
       />
       <div style={{ marginTop: 12 }}>
@@ -79,8 +82,11 @@ export function PermissionConfig() {
         {'未选择表示成员可使用所有助手'}
       </Text>
       <Checkbox.Group
-        value={memberAgents || []}
-        onChange={(vals) => setMemberAgents(vals as string[])}
+        value={memberAgents === null ? allAgents.map(a => a.id) : memberAgents}
+        onChange={(vals) => {
+          const v = vals as string[];
+          setMemberAgents(v.length === allAgents.length ? null : v);
+        }}
         options={allAgents.map(a => ({ label: a.icon + ' ' + a.name, value: a.id }))}
       />
       <div style={{ marginTop: 12 }}>
