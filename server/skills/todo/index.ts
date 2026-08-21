@@ -14,7 +14,7 @@ export class TodoSkill implements Skill {
         type: 'function',
         function: {
           name: 'create_task',
-          description: '\u521b\u5efa\u4e00\u4e2a\u65b0\u7684\u5f85\u529e\u4efb\u52a1\uff0c\u53ef\u5206\u914d\u7ed9\u56e2\u961f\u6210\u5458',
+          description: '\u521b\u5efa\u4e00\u4e2a\u65b0\u7684\u5f85\u529e\u4efb\u52a1\uff0c\u53ef\u5206\u914d\u7ed9\u56e2\u961f\u6210\u5458\u3002\u5206\u914d\u524d\u8bf7\u5148\u8c03\u7528 list_users \u83b7\u53d6\u7528\u6237 ID\u3002',
           parameters: {
             type: 'object',
             properties: {
@@ -61,6 +61,17 @@ export class TodoSkill implements Skill {
           },
         },
       },
+      {
+        type: 'function',
+        function: {
+          name: 'list_users',
+          description: '查询所有可分配任务的团队成员，返回用户 ID 和显示名。分配任务前请先调用此工具获取正确的用户 ID。',
+          parameters: {
+            type: 'object',
+            properties: {},
+          },
+        },
+      },
     ];
   }
 
@@ -68,6 +79,7 @@ export class TodoSkill implements Skill {
     switch (toolName) {
       case 'create_task': return this.createTask(input, context);
       case 'list_tasks': return this.listTasks(input);
+      case 'list_users': return this.listUsers();
       case 'update_task': return this.updateTask(input, context);
       default: throw new Error('Unknown tool: ' + toolName);
     }
@@ -121,6 +133,17 @@ export class TodoSkill implements Skill {
       return '- [' + t.status + '] ' + t.title + ' (priority: ' + t.priority + ', assignees: ' + (assignees || 'none') + ')';
     });
     return '\u627e\u5230 ' + tasks.length + ' \u4e2a\u4efb\u52a1\uff1a\n' + lines.join('\n');
+  }
+
+
+  private listUsers(): string {
+    const users = db.getAllUsers();
+    if (users.length === 0) return '没有可分配的团队成员。';
+
+    const lines = users.map((u: any) => 
+      `- ${u.display_name}（ID: ${u.id}，用户名: ${u.username}）`
+    );
+    return '团队成员列表：\n' + lines.join('\n');
   }
 
   private updateTask(input: Record<string, unknown>, context: SkillContext): string {
