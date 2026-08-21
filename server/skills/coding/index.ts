@@ -28,39 +28,30 @@ function truncate(s: string): string {
 }
 
 // ---- 命令安全：危险命令黑名单 ----
-const BLOCKED_PATTERNS = [
+const BLOCKED_PATTERNS: Array<string | RegExp> = [
+  // 字符串（精确匹配）
   'rm -rf /', 'rm -rf /*', 'rm -r /', 'rm -r /*',
   'mkfs', 'dd if=',
-  ':(){:|:&};:',  // fork bomb
+  ':(){:|:&};:',
   'chmod -r 777 /', 'chmod -r 777 /*',
   '> /dev/sda', '> /dev/nvme',
   'shutdown', 'reboot', 'halt', 'poweroff', 'init 0', 'init 6',
-  'curl.*|.*sh', 'wget.*|.*sh', 'curl.*|.*bash', 'wget.*|.*bash',  // pipe to shell
-  'format c:', 'del /s /q',  // Windows dangerous
+  'format c:', 'del /s /q',
   'rd /s /q c:\\', 'rmdir /s /q c:\\',
   'reg delete', 'bcdedit',
+  // 正则（模式匹配）
+  /curl.*\|.*sh/, /wget.*\|.*sh/,
+  /curl.*\|.*bash/, /wget.*\|.*bash/,
 ];
 
 function validateCommand(cmd: string): { safe: boolean; reason?: string } {
   const normalized = cmd.toLowerCase().trim();
   for (const pattern of BLOCKED_PATTERNS) {
-    const p = pattern.toLowerCase();
-    if (p.includes('.*')) {
-      // regex pattern
-      try {
-        const re = new RegExp(p);
-        if (re.test(normalized)) {
-          return { safe: false, reason: `命令包含危险操作: ${pattern}` };
-        }
-      } catch {
-        if (normalized.includes(p)) {
-          return { safe: false, reason: `命令包含危险操作: ${pattern}` };
-        }
-      }
-    } else {
-      if (normalized.includes(p)) {
-        return { safe: false, reason: `命令包含危险操作: ${pattern}` };
-      }
+    const matched = pattern instanceof RegExp
+      ? pattern.test(normalized)
+      : normalized.includes(pattern);
+    if (matched) {
+      return { safe: false, reason: `命令包含危险操作: ${pattern}` };
     }
   }
   return { safe: true };
@@ -283,13 +274,16 @@ export const codingSkill: Skill = {
         try {
           const { stdout, stderr } = await execAsync(cmd, {
             cwd,
-            maxBuffer: 20 * 1024 * 1024,
-            timeout: 120000,
+            maxBuffer: 1024 * 1024,
+            timeout: 30000,
           });
           const out = (stdout || '') + (stderr ? `\n[stderr]\n${stderr}` : '');
           return truncate(out || '(命令无输出)');
         } catch (e: any) {
-          const out = `${(e.stdout || '') + (e.stderr ? '\n' + e.stderr : '')}\n[exit ${e.code ?? '?'}] ${e.message || ''}`;
+      if (e.killed) {
+        return '[错误] 命令执行超时（30秒）';
+      }
+      const out = `${(e.stdout || '') + (e.stderr ? '\n' + e.stderr : '')}\n[exit ${e.code ?? '?'}] ${e.message || ''}`;
           return truncate(out);
         }
       }
