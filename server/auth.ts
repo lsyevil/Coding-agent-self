@@ -53,10 +53,15 @@ export function authMiddleware(req: Request, res: Response, next: NextFunction):
   try {
     const token = header.slice(7);
     const payload = jwt.verify(token, JWT_SECRET) as AuthPayload;
-    // 检查 token 黑名单
-    if (payload.jti && db.isBlacklisted(payload.jti)) {
-      res.status(401).json({ error: 'Token 已被吊销' });
-      return;
+    // 检查 Token 黑名单
+    if (payload.jti) {
+      if (db.isBlacklisted(payload.jti)) {
+        res.status(401).json({ error: 'Token 已被吊销' });
+        return;
+      }
+    } else {
+      // 旧 Token 无 jti，记录警告
+      console.warn(`[Auth] Token without jti from user ${payload.userId}, skipping blacklist check`);
     }
     // 检查用户是否已被删除
     if (db.isBlacklisted(`user_deleted_${payload.userId}`)) {
