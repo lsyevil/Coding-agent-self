@@ -151,6 +151,16 @@ db.exec(`
     updated_at TEXT NOT NULL
   );
 
+  -- ============ Token 黑名单（JWT 吊销） ============
+  CREATE TABLE IF NOT EXISTS token_blacklist (
+    jti TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    expires_at TEXT NOT NULL,
+    created_at TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_token_blacklist_user ON token_blacklist(user_id);
+  CREATE INDEX IF NOT EXISTS idx_token_blacklist_expires ON token_blacklist(expires_at);
+
   -- ============ 文献 ============
   CREATE TABLE IF NOT EXISTS papers (
     id TEXT PRIMARY KEY,

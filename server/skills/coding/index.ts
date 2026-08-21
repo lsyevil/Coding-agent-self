@@ -280,10 +280,10 @@ export const codingSkill: Skill = {
           const out = (stdout || '') + (stderr ? `\n[stderr]\n${stderr}` : '');
           return truncate(out || '(命令无输出)');
         } catch (e: any) {
-      if (e.killed) {
-        return '[错误] 命令执行超时（30秒）';
-      }
-      const out = `${(e.stdout || '') + (e.stderr ? '\n' + e.stderr : '')}\n[exit ${e.code ?? '?'}] ${e.message || ''}`;
+          if (e.killed) {
+            return '[错误] 命令执行超时（30秒）';
+          }
+          const out = `${(e.stdout || '') + (e.stderr ? '\n' + e.stderr : '')}\n[exit ${e.code ?? '?'}] ${e.message || ''}`;
           return truncate(out);
         }
       }

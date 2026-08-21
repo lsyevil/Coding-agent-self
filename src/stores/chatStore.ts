@@ -39,6 +39,8 @@ interface ChatState {
   setSelectedModel: (model: string) => void;
   currentAgentId: string;
   setCurrentAgent: (agentId: string) => void;
+  pendingPrompt: string | null;
+  setPendingPrompt: (prompt: string | null) => void;
 
   fetchSessions: () => Promise<void>;
   selectSession: (id: string) => Promise<void>;
@@ -61,6 +63,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
   selectedModel: localStorage.getItem('selectedModel') || null,
   currentAgentId: localStorage.getItem('currentAgentId') || 'default',
+  pendingPrompt: null,
+  setPendingPrompt: (prompt: string | null) => {
+    set({ pendingPrompt: prompt });
+  },
 
   setSelectedModel: (model: string) => {
     set({ selectedModel: model || null });

@@ -1,25 +1,32 @@
-import { Input, Button, Space, Select, Segmented } from 'antd';
+import { Input, Button, Space, Select } from 'antd';
 import { SendOutlined, StopOutlined } from '@ant-design/icons';
-import { useState, KeyboardEvent } from 'react';
+import { useState, KeyboardEvent, useRef, useEffect } from 'react';
 import { useChatStore } from '../../stores/chatStore';
 import { useAvailableModels } from '../../hooks/useAvailableModels';
-import { useAvailableAgents } from '../../hooks/useAvailableAgents';
 
 const { TextArea } = Input;
 
 export function ChatInput() {
   const [value, setValue] = useState('');
+  const textAreaRef = useRef<any>(null);
   const {
     sendMessage,
     isLoading,
     stopGeneration,
     selectedModel,
     setSelectedModel,
-    currentAgentId,
-    setCurrentAgent,
+    pendingPrompt,
+    setPendingPrompt,
   } = useChatStore();
   const { models, loading } = useAvailableModels();
-  const { agents } = useAvailableAgents();
+
+  useEffect(() => {
+    if (pendingPrompt) {
+      setValue((prev) => (prev ? prev + ' ' + pendingPrompt : pendingPrompt));
+      setPendingPrompt(null);
+      textAreaRef.current?.focus();
+    }
+  }, [pendingPrompt, setPendingPrompt]);
 
   const handleSend = async () => {
     if (!value.trim() || isLoading) return;
@@ -34,38 +41,25 @@ export function ChatInput() {
     }
   };
 
-  const agentOptions = agents.map((a) => ({
-    label: `${a.icon} ${a.name}`,
-    value: a.id,
-  }));
-
   const modelOptions = models.map((m) => ({ label: m.name, value: m.modelId }));
 
   return (
     <div style={{ padding: 16, borderTop: '1px solid #f0f0f0', backgroundColor: '#fff' }}>
-      {/* 工具栏：角色切换 + 模型选择（位于输入框上方） */}
       <div style={{ maxWidth: 800, margin: '0 auto 8px' }}>
-        <Space size={8} wrap>
-          <Segmented
-            size="small"
-            value={currentAgentId}
-            onChange={(val) => setCurrentAgent(val as string)}
-            options={agentOptions}
-          />
-          <Select
-            size="small"
-            value={selectedModel ?? (models[0]?.modelId || undefined)}
-            onChange={(val) => setSelectedModel(val)}
-            disabled={models.length <= 1}
-            loading={loading}
-            placeholder="默认模型"
-            style={{ width: 160 }}
-            options={modelOptions}
-          />
-        </Space>
+        <Select
+          size="small"
+          value={selectedModel ?? (models[0]?.modelId || undefined)}
+          onChange={(val) => setSelectedModel(val)}
+          disabled={models.length <= 1}
+          loading={loading}
+          placeholder="默认模型"
+          style={{ width: 160 }}
+          options={modelOptions}
+        />
       </div>
       <div style={{ maxWidth: 800, margin: '0 auto', display: 'flex', gap: 8 }}>
         <TextArea
+          ref={textAreaRef}
           value={value}
           onChange={(e) => setValue(e.target.value)}
           onKeyDown={handleKeyDown}
