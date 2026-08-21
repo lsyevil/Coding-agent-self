@@ -42,8 +42,10 @@ router.get('/available-models', authMiddleware, (req, res) => {
 
   const config = db.getSystemConfig('member_models');
   if (config) {
-    const allowed = JSON.parse(config);
-    return res.json({ models: allModels.filter((m: string) => allowed.includes(m)).map((m: string) => ({ modelId: m, name: m })) });
+    try {
+      const allowed = JSON.parse(config);
+      return res.json({ models: allModels.filter((m: string) => allowed.includes(m)).map((m: string) => ({ modelId: m, name: m })) });
+    } catch { /* corrupted data, fall through to all models */ }
   }
 
   res.json({ models: allModels.map((m: string) => ({ modelId: m, name: m })) });
@@ -64,8 +66,10 @@ router.get('/available-agents', authMiddleware, (req, res) => {
 
   const config = db.getSystemConfig('member_agents');
   if (config) {
-    const allowed = JSON.parse(config);
-    return res.json({ agents: allAgents.filter(a => allowed.includes(a.id)) });
+    try {
+      const allowed = JSON.parse(config);
+      return res.json({ agents: allAgents.filter(a => allowed.includes(a.id)) });
+    } catch { /* corrupted data, fall through to all agents */ }
   }
 
   res.json({ agents: allAgents });
@@ -96,7 +100,11 @@ router.get('/member-models', authMiddleware, (req, res) => {
   const user = (req as any).user as AuthPayload;
   if (user.role !== 'admin') return res.status(403).json({ error: '仅管理员可操作' });
   const config = db.getSystemConfig('member_models');
-  res.json({ models: config ? JSON.parse(config) : null });
+  try {
+    res.json({ models: config ? JSON.parse(config) : null });
+  } catch {
+    res.json({ models: null });
+  }
 });
 
 // GET /api/settings/member-agents
@@ -104,7 +112,11 @@ router.get('/member-agents', authMiddleware, (req, res) => {
   const user = (req as any).user as AuthPayload;
   if (user.role !== 'admin') return res.status(403).json({ error: '仅管理员可操作' });
   const config = db.getSystemConfig('member_agents');
-  res.json({ agents: config ? JSON.parse(config) : null });
+  try {
+    res.json({ agents: config ? JSON.parse(config) : null });
+  } catch {
+    res.json({ agents: null });
+  }
 });
 
 export default router;

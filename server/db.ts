@@ -1039,4 +1039,17 @@ export function deleteUser(id: string): boolean {
   return db.prepare('DELETE FROM users WHERE id = ?').run(id).changes > 0;
 }
 
+/** Cascade cleanup: remove user's related data before deleting the user */
+export function cleanupUserData(userId: string): void {
+  const cleanup = db.transaction(() => {
+    db.prepare('DELETE FROM conversation_members WHERE user_id = ?').run(userId);
+    db.prepare('DELETE FROM im_messages WHERE sender_id = ?').run(userId);
+    db.prepare('DELETE FROM task_assignees WHERE user_id = ?').run(userId);
+    db.prepare('DELETE FROM task_comments WHERE user_id = ?').run(userId);
+    db.prepare('DELETE FROM event_participants WHERE user_id = ?').run(userId);
+    db.prepare('DELETE FROM paper_notes WHERE user_id = ?').run(userId);
+  });
+  cleanup();
+}
+
 export default db;
