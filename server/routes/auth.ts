@@ -148,8 +148,12 @@ router.delete('/users/:id', authMiddleware, async (req, res) => {
   if (!user) return res.status(404).json({ error: '用户不存在' });
 
   db.cleanupUserData(user.id);
-  // Cascade cleanup done
+  // 吊销该用户的所有 token
+  db.blacklistUserTokens(user.id);
+  // 删除用户
   db.deleteUser(user.id);
+  // 清理过期的黑名单记录
+  db.cleanupExpiredBlacklist();
   res.json({ success: true });
 });
 

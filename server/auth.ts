@@ -1,6 +1,8 @@
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
 import { Request, Response, NextFunction } from 'express';
+import { v4 as uuidv4 } from 'uuid';
+import * as db from './db.js';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'change-me-in-production';
 const TOKEN_EXPIRES = process.env.JWT_EXPIRES_IN || '24h';
@@ -9,6 +11,7 @@ export interface AuthPayload {
   userId: string;
   username: string;
   role: string;
+  jti?: string;
 }
 
 /** 生成 JWT */
@@ -18,7 +21,7 @@ export function generateToken(user: {
   role: string;
 }): string {
   return jwt.sign(
-    { userId: user.id, username: user.username, role: user.role } as AuthPayload,
+    { userId: user.id, username: user.username, role: user.role, jti: uuidv4() } as AuthPayload & { jti: string },
     JWT_SECRET,
     { expiresIn: TOKEN_EXPIRES }
   );
@@ -50,6 +53,16 @@ export function authMiddleware(req: Request, res: Response, next: NextFunction):
   try {
     const token = header.slice(7);
     const payload = jwt.verify(token, JWT_SECRET) as AuthPayload;
+    // 检查 token 黑名单
+    if (payload.jti && db.isBlacklisted(payload.jti)) {
+      res.status(401).json({ error: 'Token 已被吊销' });
+      return;
+    }
+    // 检查用户是否已被删除
+    if (db.isBlacklisted(`user_deleted_${payload.userId}`)) {
+      res.status(401).json({ error: '用户已被删除' });
+      return;
+    }
     (req as any).user = payload;
     next();
   } catch {

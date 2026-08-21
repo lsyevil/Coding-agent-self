@@ -1052,4 +1052,51 @@ export function cleanupUserData(userId: string): void {
   cleanup();
 }
 
+
+// ============= Token 黑名单 =============
+
+export function addToBlacklist(jti: string, userId: string, expiresAt: string): void {
+  db.prepare('INSERT OR IGNORE INTO token_blacklist (jti, user_id, expires_at, created_at) VALUES (?, ?, ?, ?)')
+    .run(jti, userId, expiresAt, new Date().toISOString());
+}
+
+export function isBlacklisted(jti: string): boolean {
+  const row = db.prepare('SELECT 1 FROM token_blacklist WHERE jti = ?').get(jti);
+  return !!row;
+}
+
+export function blacklistUserTokens(userId: string): void {
+  // 标记该用户的所有 token 为已吊销（用 user_deleted_ 前缀标记）
+  const now = new Date().toISOString();
+  db.prepare('INSERT OR IGNORE INTO token_blacklist (jti, user_id, expires_at, created_at) VALUES (?, ?, ?, ?)')
+    .run(`user_deleted_${userId}`, userId, '2099-12-31', now);
+}
+
+export function cleanupExpiredBlacklist(): void {
+  db.prepare('DELETE FROM token_blacklist WHERE expires_at < ?').run(new Date().toISOString());
+}
+
+
+// ============= Token 黑名单 =============
+
+export function addToBlacklist(jti: string, userId: string, expiresAt: string): void {
+  db.prepare('INSERT OR IGNORE INTO token_blacklist (jti, user_id, expires_at, created_at) VALUES (?, ?, ?, ?)')
+    .run(jti, userId, expiresAt, new Date().toISOString());
+}
+
+export function isBlacklisted(jti: string): boolean {
+  const row = db.prepare('SELECT 1 FROM token_blacklist WHERE jti = ?').get(jti);
+  return !!row;
+}
+
+export function blacklistUserTokens(userId: string): void {
+  const now = new Date().toISOString();
+  db.prepare('INSERT OR IGNORE INTO token_blacklist (jti, user_id, expires_at, created_at) VALUES (?, ?, ?, ?)')
+    .run(`user_deleted_${userId}`, userId, '2099-12-31', now);
+}
+
+export function cleanupExpiredBlacklist(): void {
+  db.prepare('DELETE FROM token_blacklist WHERE expires_at < ?').run(new Date().toISOString());
+}
+
 export default db;
