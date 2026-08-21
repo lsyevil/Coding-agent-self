@@ -17,7 +17,7 @@ interface QuickAction {
 }
 
 const WELCOME: Record<string, { title: string; desc: string }> = {
-  default: { title: '你好，我是办公助手 👋', desc: '{welcome.desc}' },
+  default: { title: '你好，我是办公助手 👋', desc: '我可以帮助你处理文档、管理日程、检索文献、分配任务等日常工作' },
   research: { title: '你好，我是科研助手 📚', desc: '我可以帮助你检索文献、撰写综述、设计研究方案、润色论文' },
   writing: { title: '你好，我是写作助手 ✍️', desc: '我可以帮助你撰写报告、润色文档、翻译内容、调整格式' },
 };
@@ -60,7 +60,7 @@ export function NewChatView() {
       <div style={{ textAlign: 'center', marginBottom: 24 }}>
         <Title level={2}>{welcome.title}</Title>
         <Paragraph type="secondary">
-          我可以帮助你处理文档、管理日程、检索文献、分配任务等日常工作
+          {welcome.desc}
         </Paragraph>
       </div>
 
