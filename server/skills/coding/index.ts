@@ -27,6 +27,45 @@ function truncate(s: string): string {
   );
 }
 
+// ---- 命令安全：危险命令黑名单 ----
+const BLOCKED_PATTERNS = [
+  'rm -rf /', 'rm -rf /*', 'rm -r /', 'rm -r /*',
+  'mkfs', 'dd if=',
+  ':(){:|:&};:',  // fork bomb
+  'chmod -r 777 /', 'chmod -r 777 /*',
+  '> /dev/sda', '> /dev/nvme',
+  'shutdown', 'reboot', 'halt', 'poweroff', 'init 0', 'init 6',
+  'curl.*|.*sh', 'wget.*|.*sh', 'curl.*|.*bash', 'wget.*|.*bash',  // pipe to shell
+  'format c:', 'del /s /q',  // Windows dangerous
+  'rd /s /q c:\\', 'rmdir /s /q c:\\',
+  'reg delete', 'bcdedit',
+];
+
+function validateCommand(cmd: string): { safe: boolean; reason?: string } {
+  const normalized = cmd.toLowerCase().trim();
+  for (const pattern of BLOCKED_PATTERNS) {
+    const p = pattern.toLowerCase();
+    if (p.includes('.*')) {
+      // regex pattern
+      try {
+        const re = new RegExp(p);
+        if (re.test(normalized)) {
+          return { safe: false, reason: `命令包含危险操作: ${pattern}` };
+        }
+      } catch {
+        if (normalized.includes(p)) {
+          return { safe: false, reason: `命令包含危险操作: ${pattern}` };
+        }
+      }
+    } else {
+      if (normalized.includes(p)) {
+        return { safe: false, reason: `命令包含危险操作: ${pattern}` };
+      }
+    }
+  }
+  return { safe: true };
+}
+
 // ---- 递归内容搜索 ----
 const IGNORE_DIRS = new Set(['node_modules', '.git', 'dist', 'build', '.cache', '.next', 'coverage']);
 
@@ -235,6 +274,11 @@ export const codingSkill: Skill = {
       }
       case 'run_command': {
         const cmd = String(input.command);
+        // 命令安全校验
+        const validation = validateCommand(cmd);
+        if (!validation.safe) {
+          return `[已拒绝] ${validation.reason}`;
+        }
         const cwd = resolveWithin(workingDir, String(input.cwd || '.'));
         try {
           const { stdout, stderr } = await execAsync(cmd, {
