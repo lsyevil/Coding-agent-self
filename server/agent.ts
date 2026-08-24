@@ -47,21 +47,32 @@ export interface RunAgentParams {
   requestPermission: RequestPermissionFn;
   /** 当前用户 ID（供 Skill 使用） */
   userId?: string;
+  /** 会话 ID（用于中断控制） */
+  sessionId?: string;
 }
 
-const MAX_TURNS = 25; // 单次请求最大工具轮数
+const MAX_TURNS = 25;
+const TOTAL_TIMEOUT = 5 * 60 * 1000; // 5 minutes // 单次请求最大工具轮数
 
 // 需要权限确认的工具（写/改/删文件 + 执行命令）
 const MUTATING_TOOLS = new Set(['write_file', 'edit_file', 'delete_file']);
 const COMMAND_TOOLS = new Set(['run_command']);
+
+// ---- 中断机制 ----
+const cancelFlags = new Set<string>();
+
+export function cancelAgent(sessionId: string) {
+  cancelFlags.add(sessionId);
+}
 
 // ---- 主循环 ----
 export async function runCodingAgent(params: RunAgentParams): Promise<{
   content: string;
   toolCalls: ToolCallRec[];
 }> {
-  const { apiKey, baseURL, model, messages, workingDir, permissionMode, emit, requestPermission, userId } =
+  const { apiKey, baseURL, model, messages, workingDir, permissionMode, emit, requestPermission, userId, sessionId } =
     params;
+  const startTime = Date.now();
   const client = new OpenAI({ apiKey, baseURL: baseURL || undefined });
 
   // 工具定义与执行均来自 Skill 注册表（动态加载）
@@ -71,6 +82,19 @@ export async function runCodingAgent(params: RunAgentParams): Promise<{
   let fullResponse = '';
 
   for (let turn = 0; turn < MAX_TURNS; turn++) {
+    // Check timeout
+    if (Date.now() - startTime > TOTAL_TIMEOUT) {
+      emit({ type: 'error', message: 'Agent 执行超时（5分钟）' });
+      break;
+    }
+    
+    // Check user cancel
+    if (sessionId && cancelFlags.has(sessionId)) {
+      cancelFlags.delete(sessionId);
+      emit({ type: 'info', message: '用户已中断' });
+      break;
+    }
+    
     const stream = await client.chat.completions.create({
       model,
       messages,
