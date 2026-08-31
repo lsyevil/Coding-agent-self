@@ -604,3 +604,10 @@ t-chat-sender::part(send-btn):disabled,
 .permission-card-pulse {
   animation: permission-pulse 2s ease-in-out infinite;
 }
+
+/* 用户管理页里已注销用户的行：整行降低对比度，
+   避免管理员在长列表里把已注销的人当成在职同事。
+   只降不隐藏 —— 这一行还要能点「恢复」按钮。 */
+.user-row-deleted > td {
+  opacity: 0.45;
+}

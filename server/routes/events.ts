@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { v4 as uuidv4 } from 'uuid';
 import { AuthPayload } from '../auth.js';
 import * as db from '../db.js';
+import { toPublicUser } from '../presenters.js';
 
 const router = Router();
 
@@ -22,13 +23,7 @@ router.get('/', (req, res) => {
     const participants = db.getEventParticipants(event.id);
     return {
       ...event,
-      participants: participants.map((p) => ({
-        id: p.id,
-        username: p.username,
-        displayName: p.display_name,
-        avatar: p.avatar,
-        status: p.status,
-      })),
+      participants: participants.map((p) => ({ ...toPublicUser(p), status: p.status })),
     };
   });
 
@@ -76,13 +71,7 @@ router.post('/', (req, res) => {
     db.addEventParticipant(event.id, uid, status);
   }
 
-  const participants = db.getEventParticipants(event.id).map((p) => ({
-    id: p.id,
-    username: p.username,
-    displayName: p.display_name,
-    avatar: p.avatar,
-    status: p.status,
-  }));
+  const participants = db.getEventParticipants(event.id).map((p) => ({ ...toPublicUser(p), status: p.status }));
 
   res.json({ 
     event: { ...event, participants },
@@ -120,13 +109,7 @@ router.get('/:id', (req, res) => {
   const event = db.getEvent(req.params.id);
   if (!event) return res.status(404).json({ error: '日程不存在' });
 
-  const participants = db.getEventParticipants(event.id).map((p) => ({
-    id: p.id,
-    username: p.username,
-    displayName: p.display_name,
-    avatar: p.avatar,
-    status: p.status,
-  }));
+  const participants = db.getEventParticipants(event.id).map((p) => ({ ...toPublicUser(p), status: p.status }));
 
   res.json({ event: { ...event, participants } });
 });

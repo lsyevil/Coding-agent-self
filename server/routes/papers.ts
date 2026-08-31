@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { v4 as uuidv4 } from 'uuid';
 import { AuthPayload } from '../auth.js';
 import * as db from '../db.js';
+import { displayNameOf } from '../presenters.js';
 
 const router = Router();
 
@@ -104,7 +105,7 @@ router.get('/:id/notes', (req, res) => {
   const paper = db.getPaper(req.params.id);
   if (!paper) return res.status(404).json({ error: '文献不存在' });
   const notes = db.getPaperNotes(paper.id);
-  const enriched = notes.map((n) => { const u = db.getUser(n.user_id); return { ...n, userName: u?.display_name || u?.username || '未知' }; });
+  const enriched = notes.map((n) => { const u = db.getUser(n.user_id); return { ...n, userName: displayNameOf(u) }; });
   res.json({ notes: enriched });
 });
 

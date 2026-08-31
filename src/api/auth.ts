@@ -31,6 +31,14 @@ export interface UserInfo {
   displayName: string;
   role: 'admin' | 'member';
   avatar: string | null;
+  /**
+   * 注销时间，null = 在职。
+   *
+   * 注意本接口（账号面）给的 displayName 是**原始**姓名、不带「（已注销）」后缀 ——
+   * 编辑弹窗要把它回填进输入框，带后缀的话一保存就写成了真实姓名。
+   * 会话成员、任务负责人等内容面接口走的是另一套表示，那里的 displayName 带后缀。
+   */
+  deletedAt?: string | null;
 }
 
 export async function registerUser(data: RegisterData): Promise<{ user: UserInfo }> {
@@ -45,8 +53,11 @@ export async function registerUser(data: RegisterData): Promise<{ user: UserInfo
   return res.json();
 }
 
-export async function fetchUsers(): Promise<UserInfo[]> {
-  const res = await apiFetch('/api/auth/users');
+/** includeDeleted 仅管理员有效，服务端会忽略非管理员的该参数。 */
+export async function fetchUsers(options?: { includeDeleted?: boolean }): Promise<UserInfo[]> {
+  const res = await apiFetch(
+    options?.includeDeleted ? '/api/auth/users?includeDeleted=1' : '/api/auth/users'
+  );
   if (!res.ok) throw new Error('获取用户列表失败');
   const data = await res.json();
   return data.users || [];

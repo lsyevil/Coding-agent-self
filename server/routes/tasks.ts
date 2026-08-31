@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { v4 as uuidv4 } from 'uuid';
 import { AuthPayload } from '../auth.js';
 import * as db from '../db.js';
+import { toPublicUser, displayNameOf } from '../presenters.js';
 
 const router = Router();
 
@@ -21,12 +22,7 @@ router.get('/', (req, res) => {
     const assignees = db.getTaskAssignees(task.id);
     return {
       ...task,
-      assignees: assignees.map((u) => ({
-        id: u.id,
-        username: u.username,
-        displayName: u.display_name,
-        avatar: u.avatar,
-      })),
+      assignees: assignees.map(toPublicUser),
     };
   });
 
@@ -62,12 +58,7 @@ router.post('/', (req, res) => {
     db.addTaskAssignee(task.id, uid, role as 'owner' | 'collaborator');
   }
 
-  const assignees = db.getTaskAssignees(task.id).map((u) => ({
-    id: u.id,
-    username: u.username,
-    displayName: u.display_name,
-    avatar: u.avatar,
-  }));
+  const assignees = db.getTaskAssignees(task.id).map(toPublicUser);
 
   res.json({ task: { ...task, assignees } });
 });
@@ -77,12 +68,7 @@ router.get('/:id', (req, res) => {
   const task = db.getTask(req.params.id);
   if (!task) return res.status(404).json({ error: '任务不存在' });
 
-  const assignees = db.getTaskAssignees(task.id).map((u) => ({
-    id: u.id,
-    username: u.username,
-    displayName: u.display_name,
-    avatar: u.avatar,
-  }));
+  const assignees = db.getTaskAssignees(task.id).map(toPublicUser);
 
   res.json({ task: { ...task, assignees } });
 });
@@ -175,7 +161,7 @@ router.get('/:id/comments', (req, res) => {
   const comments = db.getTaskComments(task.id);
   const enriched = comments.map((c) => {
     const u = db.getUser(c.user_id);
-    return { ...c, userName: u?.display_name || u?.username || '未知' };
+    return { ...c, userName: displayNameOf(u) };
   });
   res.json({ comments: enriched });
 });

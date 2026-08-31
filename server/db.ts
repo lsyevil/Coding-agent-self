@@ -74,7 +74,12 @@ db.exec(`
     role TEXT NOT NULL DEFAULT 'member' CHECK (role IN ('admin', 'member')),
     avatar TEXT,
     created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL
+    updated_at TEXT NOT NULL,
+    -- 注销时间。NULL = 在职。
+    -- 用软删除而非 DELETE：users 上有 10 个外键引用，其中 7 个是 ON DELETE NO ACTION，
+    -- 真删就必须先改判或清理所有引用行 —— 那会不可逆地销毁群聊历史的发言归属。
+    -- 保留行则整类外键问题根本不出现，且「张三(已注销)」的个体身份还在。
+    deleted_at TEXT
   );
 
   -- ============ IM 会话 ============
@@ -217,10 +222,58 @@ try {
   // 忽略错误（列可能已存在）
 }
 
+// 数据库迁移：为旧库补充 users.deleted_at 列（软删除）
+try {
+  const userCols = db.prepare('PRAGMA table_info(users)').all() as Array<{ name: string }>;
+  if (!userCols.some((col) => col.name === 'deleted_at')) {
+    // 可空、无默认值：现存用户全部视为在职（NULL）
+    db.exec('ALTER TABLE users ADD COLUMN deleted_at TEXT');
+    console.log('[DB] 已为 users 表添加 deleted_at 列（软删除）');
+  }
+} catch (e) {
+  // 忽略错误（列可能已存在）
+}
+
+/**
+ * 检查有多少内容的归属已被旧版删除逻辑改判到占位账号上。
+ *
+ * 早先的 deleteUserAndReassignContent() 用 UPDATE 把 created_by/added_by 改成了
+ * 占位账号 ID —— 原始 user id 被覆盖，**没有任何地方留有副本**。
+ * 所以这些行的真实归属已经永久丢失，软删除也救不回来，这里只能如实报告。
+ */
+function warnIfContentOrphanedByLegacyDelete(): void {
+  try {
+    const pairs: Array<[string, string]> = [
+      ['conversations', 'created_by'],
+      ['tasks', 'created_by'],
+      ['events', 'created_by'],
+      ['papers', 'added_by'],
+    ];
+    let total = 0;
+    const detail: string[] = [];
+    for (const [table, col] of pairs) {
+      const { n } = db
+        .prepare(`SELECT COUNT(*) AS n FROM ${table} WHERE ${col} = ?`)
+        .get(DELETED_USER_ID) as { n: number };
+      if (n > 0) detail.push(`${table}.${col}=${n}`);
+      total += n;
+    }
+    if (total > 0) {
+      console.warn(
+        `[DB] 警告：有 ${total} 行内容的归属曾被旧版删除逻辑改判到占位账号（${detail.join(', ')}）。\n` +
+          '      这些行的原始归属已被 UPDATE 永久覆盖，无法恢复。新的软删除不会再产生此类丢失。'
+      );
+    }
+  } catch (e) {
+    // 表可能还不存在（全新库），不影响启动
+  }
+}
+
 // 确保默认管理员存在
 ensureAdminUser();
 // 顺序重要：必须在 ensureAdminUser 之后，占位账号才不会干扰「用户表是否为空」的判断
 ensureDeletedPlaceholderUser();
+warnIfContentOrphanedByLegacyDelete();
 
 // 类型定义
 export interface DbSession {
@@ -252,6 +305,8 @@ export interface DbUser {
   avatar: string | null;
   created_at: string;
   updated_at: string;
+  /** 注销时间；null = 在职 */
+  deleted_at: string | null;
 }
 
 // ============= 用户操作 =============
@@ -260,6 +315,10 @@ export interface DbUser {
 export function ensureAdminUser(): void {
   // 计数必须排除占位账号：否则占位账号一存在，全新库就永远不会创建管理员，
   // 结果是没有任何人能登录。
+  //
+  // 但**刻意不排除已注销用户**：若排除，一个「所有用户都已注销」的库会被判定为空库，
+  // 于是自动创建一个默认口令的管理员 —— 那等于给攻击者留了一条提权路径
+  // （把所有人注销掉即可获得已知口令的 admin）。宁可让库锁死、必须有 DB 权限才能救。
   const row = db
     .prepare('SELECT COUNT(*) as count FROM users WHERE id != ?')
     .get(DELETED_USER_ID) as { count: number };
@@ -293,22 +352,48 @@ export function ensureDeletedPlaceholderUser(): void {
   console.log('[DB] 已创建「已注销用户」占位账号');
 }
 
+/**
+ * 按 id 取用户。
+ *
+ * **刻意不过滤已注销用户**：群聊历史、任务评论等处要靠它渲染发言人，
+ * 过滤掉会让历史里的发言人显示不出来。调用方需要区分时看 deleted_at。
+ */
 export function getUser(id: string): DbUser | undefined {
   return db.prepare('SELECT * FROM users WHERE id = ?').get(id) as DbUser | undefined;
 }
 
+/**
+ * 按 username 取用户。
+ *
+ * ⚠️ **刻意不过滤已注销用户**，因为本函数同时服务两条路径：
+ *   1. 登录 —— 需要拒绝已注销用户
+ *   2. 注册查重 —— 需要看见已注销用户
+ *
+ * 若在此处过滤，注册查重就看不到已注销用户占用的 username，
+ * 于是绕过 409 直接撞上 UNIQUE 约束，抛 SQLITE_CONSTRAINT_UNIQUE（500 而非 409）。
+ * 所以登录的拒绝必须放在路由层显式做，不能下沉到这里。
+ */
 export function getUserByUsername(username: string): DbUser | undefined {
   return db.prepare('SELECT * FROM users WHERE username = ?').get(username) as DbUser | undefined;
 }
 
 /**
- * 列出所有真实用户。
- * 排除「已注销用户」占位账号 —— 它不该出现在成员列表、负责人选择器
- * 或 Agent 的 list_users 结果里。
+ * 列出用户。
+ *
+ * 默认排除两类：
+ *   - 「已注销用户」占位账号 —— 它不该出现在成员列表、负责人选择器或 Agent 的 list_users 里
+ *   - 已注销用户 —— 不该再被选进新的会话/任务/日程
+ *
+ * includeDeleted 仅供管理界面使用（要展示并支持恢复）。
  */
-export function getAllUsers(): DbUser[] {
+export function getAllUsers(options?: { includeDeleted?: boolean }): DbUser[] {
+  if (options?.includeDeleted) {
+    return db
+      .prepare('SELECT * FROM users WHERE id != ? ORDER BY created_at ASC')
+      .all(DELETED_USER_ID) as DbUser[];
+  }
   return db
-    .prepare('SELECT * FROM users WHERE id != ? ORDER BY created_at ASC')
+    .prepare('SELECT * FROM users WHERE id != ? AND deleted_at IS NULL ORDER BY created_at ASC')
     .all(DELETED_USER_ID) as DbUser[];
 }
 
@@ -566,7 +651,11 @@ export function createConversation(params: {
   return getConversation(params.id)!;
 }
 
-/** 获取会话成员列表 */
+/**
+ * 获取会话成员列表。
+ * 刻意包含已注销用户：这是既有关联关系，隐藏会让成员数与聊天历史里的发言人对不上。
+ * 前端按 deleted_at 渲染成「张三(已注销)」。
+ */
 export function getConversationMembers(conversationId: string): DbUser[] {
   return db.prepare(`
     SELECT u.* FROM users u
@@ -775,7 +864,10 @@ export function deleteTask(id: string): boolean {
   return db.prepare('DELETE FROM tasks WHERE id = ?').run(id).changes > 0;
 }
 
-/** 获取任务的负责人列表 */
+/**
+ * 获取任务的负责人列表。
+ * 同 getConversationMembers：刻意包含已注销用户，保持历史一致。
+ */
 export function getTaskAssignees(taskId: string): DbUser[] {
   return db.prepare(`
     SELECT u.* FROM users u
@@ -913,7 +1005,10 @@ export function deleteEvent(id: string): boolean {
   return db.prepare('DELETE FROM events WHERE id = ?').run(id).changes > 0;
 }
 
-/** 获取日程参与人列表 */
+/**
+ * 获取日程参与人列表。
+ * 同 getConversationMembers：刻意包含已注销用户，保持历史一致。
+ */
 export function getEventParticipants(eventId: string): Array<DbUser & { status: string }> {
   return db.prepare(`
     SELECT u.*, ep.status FROM users u
@@ -1091,72 +1186,193 @@ export function updateUserPassword(id: string, passwordHash: string): boolean {
   return db.prepare('UPDATE users SET password_hash = ?, updated_at = ? WHERE id = ?').run(passwordHash, new Date().toISOString(), id).changes > 0;
 }
 
-export function deleteUser(id: string): boolean {
-  if (id === DELETED_USER_ID) {
-    throw new Error('不能删除「已注销用户」占位账号');
+// ============= 用户注销（软删除）与硬删 =============
+
+/**
+ * 用户操作被业务规则拒绝（而非程序出错）。
+ *
+ * 存在的理由：这些拒绝的文案是**写给使用者看的**（「不能注销最后一个在职管理员」），
+ * 路由层要能把它们回成 400 而不是 500 —— 否则一条正常的规则拒绝会以
+ * 「删除用户失败：…」的 500 形式出现，读起来像程序 bug，还会污染错误监控。
+ * 用类型判断而不是匹配错误文案：文案会改，`instanceof` 不会跟着坏掉。
+ */
+export class UserOperationError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'UserOperationError';
   }
-  return db.prepare('DELETE FROM users WHERE id = ?').run(id).changes > 0;
 }
 
 /**
- * 原子地删除用户：改判内容归属 -> 清理成员关系 -> 删除用户。
+ * 语义上「引用了某个用户」、但**没有外键约束保护**的列。
  *
- * 背景（实测结论）：better-sqlite3 开连接时默认 foreign_keys = ON（与 sqlite3 CLI 相反），
- * 所以外键一直在生效。users 上共 10 个外键引用，其中 7 个是 ON DELETE NO ACTION，
- * 只要还有行指向该用户，DELETE FROM users 就会抛 SQLITE_CONSTRAINT_FOREIGNKEY。
+ * sessions.owner_id 存的就是 user id，然而实测 `PRAGMA foreign_key_list(sessions)`
+ * 返回空 —— SQLite 不会替我们拦住硬删，删完只会留下一个指向不存在用户的 owner_id。
+ * 所以这类「裸 user id 列」必须手工登记在此；今后新增同类列也要一并加进来。
  *
- * 两类列的处理方式不同：
- *  - 「归属」列（created_by / added_by）改判给占位账号，内容保留。
- *    直接删会连带毁掉其他人的上下文 —— 删掉建群的人会让整个群和全部消息消失。
- *  - 「成员关系」列（conversation_members / task_assignees / event_participants）
- *    删除即可，已注销的用户本就不该继续是成员。这三张表本身是 ON DELETE CASCADE，
- *    显式删只是为了让意图明确、不依赖 pragma 状态。
- *
- * 整体放在一个事务里：原先路由是 cleanupUserData() 和 deleteUser() 两次独立提交，
- * 后者失败会留下已提交的半截修改（内容改判了但用户还在）。
+ * token_blacklist.user_id 同样没有外键，但**刻意不登记**：黑名单是短生命周期的
+ * 鉴权副产物（到期即清），不是用户产出的内容。若把它算作引用，一个「注册后登录、
+ * 登出、就没再用过」的误建账号会因为几条自己会过期的记录而永远无法硬删。
+ * 它在 hardDeleteUser() 里被直接清掉，见那里的注释。
  */
-export function deleteUserAndReassignContent(userId: string): boolean {
-  if (userId === DELETED_USER_ID) {
-    throw new Error('不能删除「已注销用户」占位账号');
+const EXTRA_USER_REF_COLUMNS: Array<{ table: string; column: string }> = [
+  { table: 'sessions', column: 'owner_id' },
+];
+
+/**
+ * 运行时枚举所有指向 users 的引用列（外键 + 上面登记的裸列）。
+ *
+ * 用 PRAGMA 动态枚举而非硬编码表名：将来新增一张引用 users 的表时，硬删的安全检查
+ * 会自动覆盖到它。硬编码则会漏 —— 而漏掉的代价不是少报个数字，是
+ * 「误判 0 引用 → 放行硬删 → 数据被 CASCADE 静默清掉，或外键报错把 500 甩给用户」。
+ */
+function listUserRefColumns(): Array<{ table: string; column: string }> {
+  const tables = db
+    .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'")
+    .all() as Array<{ name: string }>;
+
+  const refs: Array<{ table: string; column: string }> = [];
+  for (const { name } of tables) {
+    const fks = db.prepare(`PRAGMA foreign_key_list("${name}")`).all() as Array<{
+      table: string;
+      from: string;
+    }>;
+    for (const fk of fks) {
+      if (fk.table === 'users') refs.push({ table: name, column: fk.from });
+    }
   }
-  ensureDeletedPlaceholderUser();
+  for (const extra of EXTRA_USER_REF_COLUMNS) {
+    if (tables.some((t) => t.name === extra.table)) refs.push(extra);
+  }
+  return refs;
+}
+
+/**
+ * 统计某用户名下还有多少条关联数据。仅用于判断「能否硬删」。
+ *
+ * **ON DELETE CASCADE 的引用也计入**（conversation_members / task_assignees /
+ * event_participants）。它们不会阻止 DELETE，但硬删的适用场景只有「误建、从没用过的
+ * 账号」—— 一旦这个账号已经被拉进会话、被指派任务，它就已经"用过"了，把这些成员关系
+ * 悄悄 CASCADE 掉会让别人的会话成员列表凭空少一个人。宁可判定为不可硬删、退回注销。
+ */
+export function countUserReferences(userId: string): {
+  total: number;
+  detail: Record<string, number>;
+} {
+  const detail: Record<string, number> = {};
+  let total = 0;
+  for (const { table, column } of listUserRefColumns()) {
+    const row = db
+      .prepare(`SELECT COUNT(*) AS n FROM "${table}" WHERE "${column}" = ?`)
+      .get(userId) as { n: number };
+    if (row.n > 0) {
+      detail[`${table}.${column}`] = row.n;
+      total += row.n;
+    }
+  }
+  return { total, detail };
+}
+
+/**
+ * 注销用户（软删除）：只写 deleted_at，不动任何一行内容。
+ *
+ * 为什么不改判归属：users 上有 10 个外键引用，7 个是 ON DELETE NO ACTION，真删就必须
+ * 先把所有引用行改判或清理掉 —— 那会不可逆地摧毁群聊历史的发言归属。保留用户行则整类
+ * 外键问题根本不出现，且「张三（已注销）」这个个体身份还在，历史消息仍能对上人。
+ *
+ * 返回 false 表示「用户不存在」或「已经是注销状态」（幂等，重复调用不报错）。
+ */
+export function softDeleteUser(userId: string): boolean {
+  if (userId === DELETED_USER_ID) {
+    throw new UserOperationError('不能注销「已注销用户」占位账号');
+  }
+  const user = getUser(userId);
+  if (!user || user.deleted_at) return false;
+
+  // 不允许注销最后一个在职管理员：注销后就再没有人能进管理页把他恢复回来，
+  // 而 ensureAdminUser() 刻意不排除已注销用户（见其注释），也不会自动补一个新 admin
+  // —— 系统会彻底锁死，只能靠直接改数据库救。这里挡住是唯一的低成本防线。
+  if (user.role === 'admin') {
+    const row = db
+      .prepare(
+        "SELECT COUNT(*) AS n FROM users WHERE role = 'admin' AND deleted_at IS NULL AND id != ?"
+      )
+      .get(userId) as { n: number };
+    if (row.n === 0) throw new UserOperationError('不能注销最后一个在职管理员');
+  }
+
+  const now = new Date().toISOString();
+  return (
+    db
+      .prepare('UPDATE users SET deleted_at = ?, updated_at = ? WHERE id = ? AND deleted_at IS NULL')
+      .run(now, now, userId).changes > 0
+  );
+}
+
+/**
+ * 恢复已注销用户。返回 false 表示「用户不存在」或「本来就在职」。
+ *
+ * 注意：username 上的 UNIQUE 约束在注销期间依然占位，所以恢复不会撞名 ——
+ * 注销期间根本没人能注册走这个 username（注册查重刻意能看见已注销用户，
+ * 见 getUserByUsername 的注释）。
+ */
+export function restoreUser(userId: string): boolean {
+  if (userId === DELETED_USER_ID) {
+    throw new UserOperationError('「已注销用户」占位账号不是真实用户，无法恢复');
+  }
+  const user = getUser(userId);
+  if (!user || !user.deleted_at) return false;
 
   const run = db.transaction(() => {
-    // 1) 归属改判，内容保留
-    db.prepare('UPDATE conversations SET created_by = ? WHERE created_by = ?').run(DELETED_USER_ID, userId);
-    db.prepare('UPDATE tasks         SET created_by = ? WHERE created_by = ?').run(DELETED_USER_ID, userId);
-    db.prepare('UPDATE events        SET created_by = ? WHERE created_by = ?').run(DELETED_USER_ID, userId);
-    db.prepare('UPDATE papers        SET added_by   = ? WHERE added_by   = ?').run(DELETED_USER_ID, userId);
+    const ok =
+      db
+        .prepare(
+          'UPDATE users SET deleted_at = NULL, updated_at = ? WHERE id = ? AND deleted_at IS NOT NULL'
+        )
+        .run(new Date().toISOString(), userId).changes > 0;
 
-    // 2) 成员关系与个人附属数据清理
-    db.prepare('DELETE FROM conversation_members WHERE user_id = ?').run(userId);
-    db.prepare('DELETE FROM im_messages         WHERE sender_id = ?').run(userId);
-    db.prepare('DELETE FROM task_assignees      WHERE user_id = ?').run(userId);
-    db.prepare('DELETE FROM task_comments       WHERE user_id = ?').run(userId);
-    db.prepare('DELETE FROM event_participants  WHERE user_id = ?').run(userId);
-    db.prepare('DELETE FROM paper_notes         WHERE user_id = ?').run(userId);
-
-    // 3) 删除用户本体
-    return db.prepare('DELETE FROM users WHERE id = ?').run(userId).changes > 0;
+    // **必须同时清掉注销时打的吊销哨兵**，否则恢复出来的是个永久登不进来的账号。
+    // blacklistUserTokens() 写入的是一行 jti = `user_deleted_<id>`、expires_at = 2099-12-31
+    // 的记录，而 authMiddleware 按 **userId** 而不是按 token 检查它 —— 也就是说
+    // 连重新登录拿到的全新 token 也会被判为「用户已被删除」，且 cleanupExpiredBlacklist()
+    // 因为 2099 的过期时间永远清不掉它。
+    // 这一步放在 restoreUser() 内部而非路由层：漏掉它的后果（账号看起来恢复了却永远
+    // 登不进）很难从现象反推原因，不能指望每个调用点都记得配对。
+    db.prepare('DELETE FROM token_blacklist WHERE jti = ?').run(`user_deleted_${userId}`);
+    return ok;
   });
 
   return run();
 }
 
 /**
- * @deprecated 请改用 deleteUserAndReassignContent()，它是原子的且会改判归属。
- * 保留此函数仅为兼容旧调用点。
+ * 硬删用户。**仅当该用户名下 0 条关联数据时才允许**，用于清理误建的账号。
+ *
+ * 检查与删除放在同一事务里：否则「查到 0 条」和「执行 DELETE」之间若有写入插进来，
+ * 就会带着已过时的判断去删。7 个 NO ACTION 外键是最后一道兜底（真有引用会抛
+ * SQLITE_CONSTRAINT_FOREIGNKEY），countUserReferences() 的作用是把那句晦涩的
+ * 约束错误换成一条能直接给用户看、并指明该改用注销的消息。
  */
-export function cleanupUserData(userId: string): void {
-  const cleanup = db.transaction(() => {
-    db.prepare('DELETE FROM conversation_members WHERE user_id = ?').run(userId);
-    db.prepare('DELETE FROM im_messages WHERE sender_id = ?').run(userId);
-    db.prepare('DELETE FROM task_assignees WHERE user_id = ?').run(userId);
-    db.prepare('DELETE FROM task_comments WHERE user_id = ?').run(userId);
-    db.prepare('DELETE FROM event_participants WHERE user_id = ?').run(userId);
-    db.prepare('DELETE FROM paper_notes WHERE user_id = ?').run(userId);
+export function hardDeleteUser(userId: string): boolean {
+  if (userId === DELETED_USER_ID) {
+    throw new UserOperationError('不能删除「已注销用户」占位账号');
+  }
+
+  const run = db.transaction(() => {
+    const { total, detail } = countUserReferences(userId);
+    if (total > 0) {
+      const parts = Object.entries(detail)
+        .map(([k, v]) => `${k}=${v}`)
+        .join('、');
+      throw new UserOperationError(`该用户名下已有 ${total} 条关联数据（${parts}），不能删除，请改用注销`);
+    }
+    // 黑名单不算引用（见 EXTRA_USER_REF_COLUMNS 注释），但用户行都不存在了，
+    // 这些 jti 记录留着只是垃圾 —— 它们本来也会到期被清，这里顺手清掉。
+    db.prepare('DELETE FROM token_blacklist WHERE user_id = ?').run(userId);
+    return db.prepare('DELETE FROM users WHERE id = ?').run(userId).changes > 0;
   });
-  cleanup();
+
+  return run();
 }
 
 

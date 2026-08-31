@@ -1,6 +1,7 @@
 import { Skill, ToolDefinition, SkillContext } from '../base.js';
 import * as db from '../../db.js';
 import { v4 as uuidv4 } from 'uuid';
+import { displayNameOf } from '../../presenters.js';
 
 export class CalendarSkill implements Skill {
   name = 'calendar';
@@ -109,7 +110,7 @@ export class CalendarSkill implements Skill {
     }
 
     const participants = db.getEventParticipants(event.id);
-    const participantNames = participants.map((u: any) => u.display_name).join(', ');
+    const participantNames = participants.map(displayNameOf).join(', ');
 
     const startDate = new Date(start_time);
     const endDate = new Date(end_time);
@@ -134,7 +135,7 @@ export class CalendarSkill implements Skill {
     const lines = events.map((e: any) => {
       const start = new Date(e.start_time);
       const timeStr = e.is_all_day ? '全天' : start.toLocaleString('zh-CN');
-      const participants = db.getEventParticipants(e.id).map((u: any) => u.display_name).join(', ');
+      const participants = db.getEventParticipants(e.id).map(displayNameOf).join(', ');
       return `- ${e.title} (${timeStr}${e.location ? ', ' + e.location : ''}) 参与人: ${participants || '无'}`;
     });
 

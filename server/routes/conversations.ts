@@ -2,24 +2,13 @@ import { Router } from 'express';
 import { v4 as uuidv4 } from 'uuid';
 import { AuthPayload } from '../auth.js';
 import * as db from '../db.js';
+import { toPublicUser, displayNameOf } from '../presenters.js';
 
 const router = Router();
 
-interface SafeMember {
-  id: string;
-  username: string;
-  displayName: string;
-  avatar: string | null;
-}
-
-function toSafeMember(u: db.DbUser): SafeMember {
-  return {
-    id: u.id,
-    username: u.username,
-    displayName: u.display_name,
-    avatar: u.avatar,
-  };
-}
+// 会话成员统一走 toPublicUser：已注销成员的名字会带上「（已注销）」后缀。
+// 成员列表刻意保留已注销的人（getConversationMembers 不过滤）—— 把他们从历史会话的
+// 成员列表里抹掉，会让「这条消息是谁发的」失去上下文。
 
 // GET /api/conversations — 我的会话列表（含成员、未读数、最后消息预览）
 router.get('/', (req, res) => {
@@ -27,7 +16,7 @@ router.get('/', (req, res) => {
   const conversations = db.getConversationsByUserId(user.userId);
 
   const result = conversations.map((conv) => {
-    const members = db.getConversationMembers(conv.id).map(toSafeMember);
+    const members = db.getConversationMembers(conv.id).map(toPublicUser);
     const unreadCount = db.getUnreadCount(conv.id, user.userId);
     const latest = db.getImMessages(conv.id, 1)[0];
     return {
@@ -84,7 +73,7 @@ router.get('/:id', (req, res) => {
     return res.status(403).json({ error: '无权访问' });
   }
 
-  const members = db.getConversationMembers(conv.id).map(toSafeMember);
+  const members = db.getConversationMembers(conv.id).map(toPublicUser);
   const unreadCount = db.getUnreadCount(conv.id, user.userId);
 
   res.json({
@@ -112,7 +101,7 @@ router.get('/:id/messages', (req, res) => {
     const sender = db.getUser(msg.sender_id);
     return {
       ...msg,
-      senderName: sender?.display_name || sender?.username || '未知',
+      senderName: displayNameOf(sender),
     };
   });
 
@@ -214,7 +203,7 @@ router.post('/:id/summarize', async (req, res) => {
   const messageText = messages
     .map((m) => {
       const sender = db.getUser(m.sender_id);
-      return `${sender?.display_name || sender?.username || '未知'}: ${m.content}`;
+      return `${displayNameOf(sender)}: ${m.content}`;
     })
     .join('\n');
 
