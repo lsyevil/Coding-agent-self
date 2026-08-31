@@ -6,7 +6,9 @@ const { Text } = Typography;
 
 interface Props {
   event: CalendarEvent;
-  onClick: () => void;
+  // 卡片嵌在可点击的日期格里，调用方需要 stopPropagation 阻止冒泡，
+  // 所以必须把事件对象透传出去。
+  onClick: (e: React.MouseEvent<HTMLDivElement>) => void;
 }
 
 const STATUS_COLORS = {
