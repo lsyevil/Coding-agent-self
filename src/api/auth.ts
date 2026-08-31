@@ -18,7 +18,6 @@ export async function login(username: string, password: string): Promise<LoginRe
   return res.json();
 }
 
-
 export interface RegisterData {
   username: string;
   password: string;

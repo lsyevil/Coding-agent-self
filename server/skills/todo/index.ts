@@ -2,6 +2,22 @@ import { Skill, ToolDefinition, SkillContext } from '../base.js';
 import * as db from '../../db.js';
 import { v4 as uuidv4 } from 'uuid';
 
+// tasks 表对 priority / status 都带 CHECK 约束。工具入参来自模型，
+// 即使 schema 里声明了 enum 也可能收到别的值 —— 不校验就会在写库时抛
+// SQLITE_CONSTRAINT_CHECK。这里统一收敛：非法值回退到默认值。
+const PRIORITIES = ['low', 'medium', 'high', 'urgent'] as const;
+const STATUSES = ['todo', 'in_progress', 'done', 'blocked'] as const;
+type Priority = (typeof PRIORITIES)[number];
+type Status = (typeof STATUSES)[number];
+
+function toPriority(v: unknown, fallback: Priority = 'medium'): Priority {
+  return PRIORITIES.includes(v as Priority) ? (v as Priority) : fallback;
+}
+
+function toStatus(v: unknown, fallback: Status = 'todo'): Status {
+  return STATUSES.includes(v as Status) ? (v as Status) : fallback;
+}
+
 export class TodoSkill implements Skill {
   name = 'todo';
   displayName = '\u5f85\u529e\u7ba1\u7406';
@@ -88,7 +104,7 @@ export class TodoSkill implements Skill {
   private createTask(input: Record<string, unknown>, context: SkillContext): string {
     const title = input.title as string;
     const description = (input.description as string) || null;
-    const priority = (input.priority as string) || 'medium';
+    const priority = toPriority(input.priority);
     const due_date = (input.due_date as string) || null;
     const assignee_ids = (input.assignee_ids as string[]) || [];
 
@@ -154,8 +170,8 @@ export class TodoSkill implements Skill {
     const updates: any = {};
     if (input.title) updates.title = input.title;
     if (input.description) updates.description = input.description;
-    if (input.status) updates.status = input.status;
-    if (input.priority) updates.priority = input.priority;
+    if (input.status) updates.status = toStatus(input.status, task.status as Status);
+    if (input.priority) updates.priority = toPriority(input.priority, task.priority);
     if (input.due_date) updates.due_date = input.due_date;
 
     db.updateTask(task_id, updates);

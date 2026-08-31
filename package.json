@@ -9,6 +9,8 @@
     "build": "vite build",
     "preview": "vite preview",
     "typecheck": "tsc -b",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "server": "tsx server/index.ts",
     "start": "tsx server/index.ts"
   },
@@ -18,6 +20,8 @@
     "axios": "^1.19.0",
     "bcryptjs": "^3.0.3",
     "better-sqlite3": "^12.6.2",
+    "dayjs": "^1.11.23",
+    "dotenv": "^16.4.5",
     "express": "^4.18.2",
     "jsonwebtoken": "^9.0.3",
     "lucide-react": "^0.563.0",
@@ -47,6 +51,7 @@
     "tailwindcss": "^3.4.17",
     "tsx": "^4.6.2",
     "typescript": "^5.3.2",
-    "vite": "^5.0.10"
+    "vite": "^5.0.10",
+    "vitest": "^1.6.0"
   }
 }

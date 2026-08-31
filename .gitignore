@@ -28,6 +28,8 @@ Thumbs.db
 .vite
 
 # tsc -b 生成的编译产物（server 由 tsx 直接运行 .ts，无需产物）
+# outDir 已指向 .tsbuild/；下面 server/**/*.js 等条目保留，用于兜住历史残留
+.tsbuild
 *.tsbuildinfo
 server/**/*.js
 server/**/*.d.ts

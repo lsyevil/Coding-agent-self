@@ -1,3 +1,6 @@
+// 必须是第一个 import：ESM 按声明顺序求值，下面的模块（auth/db/agent/ws）
+// 在自身模块作用域里就读 process.env，dotenv 晚一步它们就读到 undefined。
+import "dotenv/config";
 import express from "express";
 import { createServer } from "http";
 import { v4 as uuidv4 } from "uuid";
@@ -233,6 +236,10 @@ app.post("/api/permission-response", (req, res) => {
 // ============= SSE Heartbeat =============
 function startHeartbeat(res: any) {
   const interval = setInterval(() => {
+    if (res.writableEnded) {
+      clearInterval(interval);
+      return;
+    }
     res.write(': heartbeat\n\n');
   }, 30000);
   res.on('close', () => clearInterval(interval));
@@ -305,8 +312,21 @@ app.post("/api/chat", async (req, res) => {
   res.setHeader("Cache-Control", "no-cache");
   res.setHeader("Connection", "keep-alive");
 
-  const emit = (obj: Record<string, unknown>) => res.write(`data: ${JSON.stringify(obj)}\n\n`);
-  
+  let isClosed = false;
+  const emit = (obj: Record<string, unknown>) => {
+    if (isClosed || res.writableEnded) return;
+    res.write(`data: ${JSON.stringify(obj)}\n\n`);
+  };
+
+  // 客户端断开 -> 中断 Agent。
+  // 注意：'close' 在响应正常收尾后也会触发，必须用 writableEnded 区分，
+  // 否则每次请求结束都会留下一个 cancel 标记，把该会话的下一条消息在第 0 轮打断。
+  req.on("close", () => {
+    if (res.writableEnded) return;
+    isClosed = true;
+    if (session) cancelAgent(session.id);
+  });
+
   // Start heartbeat
   startHeartbeat(res);
 
@@ -347,9 +367,15 @@ app.post("/api/chat", async (req, res) => {
   const pm = permissionMode || process.env.DEFAULT_PERMISSION_MODE || "default";
 
   // 构建对话历史（含刚刚保存的当前 user 消息）
+  // 只取最近 N 条，避免长会话把上下文打满导致 400。
+  // 注意：这里不能把 tool_calls 一起回放 —— messages.role 有 CHECK (role IN ('user','assistant'))，
+  // 库里不存在 tool 角色的行，而带 tool_calls 的 assistant 消息必须紧跟对应的 tool 消息，
+  // 否则 OpenAI 会直接拒绝整个请求。要恢复跨轮工具上下文需先改 schema，是独立一项。
+  const MAX_HISTORY_MESSAGES = Number(process.env.MAX_HISTORY_MESSAGES) || 20;
   const historyRows = db.getMessagesBySession(session.id);
   const historyMessages = historyRows
     .filter((m) => m.role === "user" || m.role === "assistant")
+    .slice(-MAX_HISTORY_MESSAGES)
     .map((m) => ({ role: m.role, content: m.content || "" }));
 
   const messages: any[] = [
@@ -415,6 +441,7 @@ app.post("/api/chat", async (req, res) => {
       emit,
       requestPermission,
       userId: (req as any).user?.userId,
+      sessionId: session.id,
     });
 
     db.createMessage({

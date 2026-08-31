@@ -1,11 +1,8 @@
 import { Server as HttpServer } from 'http';
 import { Server, Socket } from 'socket.io';
-import jwt from 'jsonwebtoken';
 import { v4 as uuidv4 } from 'uuid';
-import { AuthPayload } from './auth.js';
+import { AuthPayload, verifyToken } from './auth.js';
 import * as db from './db.js';
-
-const JWT_SECRET = process.env.JWT_SECRET || 'change-me-in-production';
 
 export function setupWebSocket(httpServer: HttpServer): Server {
   const io = new Server(httpServer, {
@@ -18,7 +15,7 @@ export function setupWebSocket(httpServer: HttpServer): Server {
     const token = socket.handshake.auth.token;
     if (!token) return next(new Error('未认证'));
     try {
-      const payload = jwt.verify(token, JWT_SECRET) as AuthPayload;
+      const payload = verifyToken(token);
       (socket as any).user = payload;
       next();
     } catch {
