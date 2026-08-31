@@ -7,13 +7,25 @@ services:
       - "3000:3000"
     environment:
       - PORT=3000
+      - NODE_ENV=production
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - OPENAI_BASE_URL=${OPENAI_BASE_URL}
       - OPENAI_MODEL=${OPENAI_MODEL}
+      - OPENAI_MODELS=${OPENAI_MODELS}
+      - DEFAULT_SYSTEM_PROMPT=${DEFAULT_SYSTEM_PROMPT}
       # Agent 默认工作目录（对应下方挂载点）
       - DEFAULT_CWD=/workspace/repos
       - DEFAULT_PERMISSION_MODE=acceptEdits
       - MAX_TURNS=20
+      - MAX_HISTORY_MESSAGES=20
+      # 认证 —— NODE_ENV=production 下 JWT_SECRET 与 DEFAULT_ADMIN_PASSWORD 必填，
+      # 缺失服务会拒绝启动（见 server/auth.ts / server/db.ts）
+      - JWT_SECRET=${JWT_SECRET}
+      - JWT_EXPIRES_IN=${JWT_EXPIRES_IN:-24h}
+      - DEFAULT_ADMIN_USERNAME=${DEFAULT_ADMIN_USERNAME:-admin}
+      - DEFAULT_ADMIN_PASSWORD=${DEFAULT_ADMIN_PASSWORD}
+      # 允许连接 WebSocket 的前端源（逗号分隔）
+      - WS_ORIGIN=${WS_ORIGIN}
     volumes:
       # 持久化会话/消息数据库
       - procoder-data:/app/data

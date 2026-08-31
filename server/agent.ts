@@ -51,8 +51,9 @@ export interface RunAgentParams {
   sessionId?: string;
 }
 
-const MAX_TURNS = 25;
-const TOTAL_TIMEOUT = 5 * 60 * 1000; // 5 minutes // 单次请求最大工具轮数
+// 单次请求最大工具轮数
+const MAX_TURNS = Number(process.env.MAX_TURNS) || 25;
+const TOTAL_TIMEOUT = 5 * 60 * 1000; // 5 minutes
 
 // 需要权限确认的工具（写/改/删文件 + 执行命令）
 const MUTATING_TOOLS = new Set(['write_file', 'edit_file', 'delete_file']);
@@ -75,26 +76,36 @@ export async function runCodingAgent(params: RunAgentParams): Promise<{
   const startTime = Date.now();
   const client = new OpenAI({ apiKey, baseURL: baseURL || undefined });
 
+  // 清掉上一次请求可能残留的中断标记。
+  // 必须在循环【外面】只清一次：放进循环里会在每轮的 has() 检查前把标记删掉，
+  // 导致取消永远不命中。
+  if (sessionId) cancelFlags.delete(sessionId);
+
   // 工具定义与执行均来自 Skill 注册表（动态加载）
   const toolDefs = skillRegistry.getAllTools();
 
   const toolCallsAcc: ToolCallRec[] = [];
   let fullResponse = '';
+  // 循环退出原因。只有 'exhausted'（真的把轮数跑完）才额外提示，
+  // 否则超时/中断会被多报一条「已达最大轮数」。
+  let stopReason: 'done' | 'timeout' | 'cancelled' | 'exhausted' = 'exhausted';
 
   for (let turn = 0; turn < MAX_TURNS; turn++) {
     // Check timeout
     if (Date.now() - startTime > TOTAL_TIMEOUT) {
       emit({ type: 'error', message: 'Agent 执行超时（5分钟）' });
+      stopReason = 'timeout';
       break;
     }
-    
+
     // Check user cancel
     if (sessionId && cancelFlags.has(sessionId)) {
       cancelFlags.delete(sessionId);
       emit({ type: 'info', message: '用户已中断' });
+      stopReason = 'cancelled';
       break;
     }
-    
+
     const stream = await client.chat.completions.create({
       model,
       messages,
@@ -134,6 +145,7 @@ export async function runCodingAgent(params: RunAgentParams): Promise<{
     // 无工具调用 -> 本轮结束
     if (finalTools.length === 0) {
       if (content) messages.push({ role: 'assistant', content });
+      stopReason = 'done';
       break;
     }
 
@@ -211,6 +223,13 @@ export async function runCodingAgent(params: RunAgentParams): Promise<{
       emit({ type: 'tool_result', toolId, content: result, isError });
       messages.push({ role: 'tool', tool_call_id: toolId, content: result });
     }
+  }
+
+  if (stopReason === 'exhausted') {
+    emit({
+      type: 'error',
+      message: `Agent 已达到最大轮数限制（${MAX_TURNS}），任务未完成。`,
+    });
   }
 
   return { content: fullResponse, toolCalls: toolCallsAcc };

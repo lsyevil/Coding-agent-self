@@ -60,40 +60,54 @@ function validateCommand(cmd: string): { safe: boolean; reason?: string } {
 // ---- 递归内容搜索 ----
 const IGNORE_DIRS = new Set(['node_modules', '.git', 'dist', 'build', '.cache', '.next', 'coverage']);
 
-function grepWalk(dir: string, pattern: string, matches: string[], filesSeen: number): void {
-  if (filesSeen > 400 || matches.length > 80) return;
+/**
+ * 递归内容搜索。
+ * - startDir 独立于 dir 传递：匹配结果的相对路径必须以搜索起点为基准，
+ *   用 dir 会让每层子目录都只输出文件名，丢掉路径信息。
+ * - filesSeen 用对象包裹：number 是值传递，递归里的自增传不回来，限流形同虚设。
+ */
+function grepWalk(
+  dir: string,
+  startDir: string,
+  pattern: string,
+  matches: string[],
+  state: { filesSeen: number }
+): void {
+  if (state.filesSeen > 400 || matches.length > 80) return;
   let entries: fs.Dirent[];
   try {
     entries = fs.readdirSync(dir, { withFileTypes: true });
   } catch {
-    return;
+    return; // 整个目录都读不了 —— 这一处必须保持 return
   }
   for (const e of entries) {
-    if (matches.length > 80 || filesSeen > 400) break;
+    if (matches.length > 80 || state.filesSeen > 400) break;
     const full = path.join(dir, e.name);
     if (e.isDirectory()) {
       if (IGNORE_DIRS.has(e.name)) continue;
-      grepWalk(full, pattern, matches, filesSeen);
+      grepWalk(full, startDir, pattern, matches, state);
     } else if (e.isFile()) {
-      filesSeen++;
+      state.filesSeen++;
       let content: string;
       try {
         const stat = fs.statSync(full);
-        if (stat.size > 1024 * 1024) return;
+        if (stat.size > 1024 * 1024) continue; // 跳过这个大文件，而不是终止整个目录
         content = fs.readFileSync(full, 'utf8');
       } catch {
-        return;
+        continue; // 单个文件读不了也只跳过它
       }
+      // 每个文件重建正则，且不带 g：带 g 的 RegExp 有 lastIndex 状态，
+      // 跨行复用同一个实例会漏掉后面行的匹配。
       let regex: RegExp;
       try {
-        regex = new RegExp(pattern, 'gi');
+        regex = new RegExp(pattern, 'i');
       } catch {
-        regex = new RegExp(pattern.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi');
+        regex = new RegExp(pattern.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
       }
       const lines = content.split('\n');
       for (let i = 0; i < lines.length; i++) {
         if (regex.test(lines[i])) {
-          matches.push(`${path.relative(dir, full)}:${i + 1}: ${lines[i].slice(0, 200)}`);
+          matches.push(`${path.relative(startDir, full)}:${i + 1}: ${lines[i].slice(0, 200)}`);
           if (matches.length > 80) break;
         }
       }
@@ -234,7 +248,8 @@ export const codingSkill: Skill = {
       case 'search_files': {
         const start = resolveWithin(workingDir, String(input.path || '.'));
         const matches: string[] = [];
-        grepWalk(start, String(input.pattern), matches, 0);
+        const state = { filesSeen: 0 };
+        grepWalk(start, start, String(input.pattern), matches, state);
         return matches.length
           ? `匹配 "${input.pattern}" (${matches.length}):\n` + matches.join('\n')
           : `未找到匹配 "${input.pattern}"`;

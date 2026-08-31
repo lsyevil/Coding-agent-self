@@ -18,7 +18,9 @@ if (!fs.existsSync(dataDir)) {
 }
 
 // 创建数据库连接
-const db = new Database(dbPath);
+// 显式标注类型：本文件末尾 `export default db`，composite 项目要发 .d.ts，
+// 不标注时 tsc 无法为 better-sqlite3 的内部类型取名（TS4023）。
+const db: Database.Database = new Database(dbPath);
 
 // 启用 WAL 模式以提高性能
 db.pragma('journal_mode = WAL');
@@ -187,13 +189,6 @@ db.exec(`
     user_id TEXT NOT NULL REFERENCES users(id),
     content TEXT NOT NULL,
     created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL
-  );
-
-  -- ============ 系统配置 ============
-  CREATE TABLE IF NOT EXISTS system_config (
-    key TEXT PRIMARY KEY,
-    value TEXT NOT NULL,
     updated_at TEXT NOT NULL
   );
 `);
@@ -550,6 +545,14 @@ export function removeConversationMember(conversationId: string, userId: string)
   db.prepare(
     'DELETE FROM conversation_members WHERE conversation_id = ? AND user_id = ?'
   ).run(conversationId, userId);
+}
+
+/**
+ * 删除会话。conversation_members / im_messages 对 conversations(id) 都是
+ * ON DELETE CASCADE，成员与消息会随之清理（需 PRAGMA foreign_keys = ON，见 #9）。
+ */
+export function deleteConversation(id: string): boolean {
+  return db.prepare('DELETE FROM conversations WHERE id = ?').run(id).changes > 0;
 }
 
 /** 查找两人私聊会话（不存在返回 undefined） */

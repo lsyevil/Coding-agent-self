@@ -2,10 +2,17 @@
   "compilerOptions": {
     "composite": true,
     "skipLibCheck": true,
+    // target/lib 缺失时 tsc 默认 ES5，Map/Set 的 for...of 会直接报 TS2802，
+    // 且报错会让被遍历的变量退化成 any、连带触发一串 implicit-any。
+    // 服务端跑在 Node 18+ 上，ES2022 是安全下限。
+    "target": "ES2022",
+    "lib": ["ES2022"],
     "module": "ESNext",
     "moduleResolution": "bundler",
     "allowSyntheticDefaultImports": true,
-    "strict": true
+    "strict": true,
+    "types": ["node", "vitest/globals"],
+    "outDir": "./.tsbuild"
   },
-  "include": ["vite.config.ts", "server/**/*.ts"]
+  "include": ["vite.config.ts", "server/**/*.ts", "tests/**/*.ts"]
 }
