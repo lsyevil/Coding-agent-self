@@ -147,14 +147,21 @@ router.delete('/users/:id', authMiddleware, async (req, res) => {
   const user = db.getUser(req.params.id);
   if (!user) return res.status(404).json({ error: '用户不存在' });
 
-  db.cleanupUserData(user.id);
-  // 吊销该用户的所有 token
-  db.blacklistUserTokens(user.id);
-  // 删除用户
-  db.deleteUser(user.id);
-  // 清理过期的黑名单记录
-  db.cleanupExpiredBlacklist();
-  res.json({ success: true });
+  // 注意：Express 4 不捕获 async handler 的 rejection —— 抛错会让请求挂死不返回，
+  // 而不是回 500。所以这里必须自己兜住。
+  try {
+    // 归属改判 + 成员关系清理 + 删除用户本体，单事务原子完成
+    const ok = db.deleteUserAndReassignContent(user.id);
+    if (!ok) return res.status(404).json({ error: '用户不存在' });
+    // 吊销该用户的所有 token
+    db.blacklistUserTokens(user.id);
+    // 清理过期的黑名单记录
+    db.cleanupExpiredBlacklist();
+    res.json({ success: true });
+  } catch (e: any) {
+    console.error('[Auth] 删除用户失败:', e?.message || e);
+    res.status(500).json({ error: '删除用户失败：' + (e?.message || '未知错误') });
+  }
 });
 
 export default router;

@@ -11,6 +11,19 @@ const __dirname = path.dirname(__filename);
 // 数据库文件路径
 const dbPath = path.join(__dirname, '..', 'data', 'chat.db');
 
+/**
+ * 已注销用户的占位账号 ID。
+ *
+ * 删除用户时不销毁其创建的共享内容（群聊/任务/日程/文献），而是把归属改判到这里。
+ * 直接 DELETE 会连带毁掉其他人的上下文 —— 删掉一个建群的人会让整个群和全部消息消失。
+ *
+ * 必须声明在本文件顶部：ensureAdminUser() 在模块加载期（见下方初始化段）就会用到它，
+ * 而 const 不像函数声明那样提升，放在后面会因 TDZ 抛
+ * ReferenceError: Cannot access 'DELETED_USER_ID' before initialization，
+ * 导致 db.ts 加载失败、整个服务起不来。
+ */
+export const DELETED_USER_ID = '__deleted_user__';
+
 // 确保 data 目录存在
 const dataDir = path.dirname(dbPath);
 if (!fs.existsSync(dataDir)) {
@@ -206,6 +219,8 @@ try {
 
 // 确保默认管理员存在
 ensureAdminUser();
+// 顺序重要：必须在 ensureAdminUser 之后，占位账号才不会干扰「用户表是否为空」的判断
+ensureDeletedPlaceholderUser();
 
 // 类型定义
 export interface DbSession {
@@ -243,7 +258,11 @@ export interface DbUser {
 
 /** 创建默认管理员（仅当用户表为空时） */
 export function ensureAdminUser(): void {
-  const row = db.prepare('SELECT COUNT(*) as count FROM users').get() as { count: number };
+  // 计数必须排除占位账号：否则占位账号一存在，全新库就永远不会创建管理员，
+  // 结果是没有任何人能登录。
+  const row = db
+    .prepare('SELECT COUNT(*) as count FROM users WHERE id != ?')
+    .get(DELETED_USER_ID) as { count: number };
   if (row.count === 0) {
     const now = new Date().toISOString();
     const adminUser = process.env.DEFAULT_ADMIN_USERNAME || 'admin';
@@ -257,6 +276,23 @@ export function ensureAdminUser(): void {
   }
 }
 
+/**
+ * 确保「已注销用户」占位账号存在。
+ *
+ * password_hash 存 '!' —— 不是合法的 bcrypt hash，bcryptjs.compare 对它恒返回 false
+ * （已实测不抛错），因此这个账号永远无法登录。
+ */
+export function ensureDeletedPlaceholderUser(): void {
+  const existing = db.prepare('SELECT 1 FROM users WHERE id = ?').get(DELETED_USER_ID);
+  if (existing) return;
+  const now = new Date().toISOString();
+  db.prepare(`
+    INSERT INTO users (id, username, password_hash, display_name, role, avatar, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(DELETED_USER_ID, DELETED_USER_ID, '!', '已注销用户', 'member', null, now, now);
+  console.log('[DB] 已创建「已注销用户」占位账号');
+}
+
 export function getUser(id: string): DbUser | undefined {
   return db.prepare('SELECT * FROM users WHERE id = ?').get(id) as DbUser | undefined;
 }
@@ -265,8 +301,15 @@ export function getUserByUsername(username: string): DbUser | undefined {
   return db.prepare('SELECT * FROM users WHERE username = ?').get(username) as DbUser | undefined;
 }
 
+/**
+ * 列出所有真实用户。
+ * 排除「已注销用户」占位账号 —— 它不该出现在成员列表、负责人选择器
+ * 或 Agent 的 list_users 结果里。
+ */
 export function getAllUsers(): DbUser[] {
-  return db.prepare('SELECT * FROM users ORDER BY created_at ASC').all() as DbUser[];
+  return db
+    .prepare('SELECT * FROM users WHERE id != ? ORDER BY created_at ASC')
+    .all(DELETED_USER_ID) as DbUser[];
 }
 
 export function createUser(user: {
@@ -1049,10 +1092,61 @@ export function updateUserPassword(id: string, passwordHash: string): boolean {
 }
 
 export function deleteUser(id: string): boolean {
+  if (id === DELETED_USER_ID) {
+    throw new Error('不能删除「已注销用户」占位账号');
+  }
   return db.prepare('DELETE FROM users WHERE id = ?').run(id).changes > 0;
 }
 
-/** Cascade cleanup: remove user's related data before deleting the user */
+/**
+ * 原子地删除用户：改判内容归属 -> 清理成员关系 -> 删除用户。
+ *
+ * 背景（实测结论）：better-sqlite3 开连接时默认 foreign_keys = ON（与 sqlite3 CLI 相反），
+ * 所以外键一直在生效。users 上共 10 个外键引用，其中 7 个是 ON DELETE NO ACTION，
+ * 只要还有行指向该用户，DELETE FROM users 就会抛 SQLITE_CONSTRAINT_FOREIGNKEY。
+ *
+ * 两类列的处理方式不同：
+ *  - 「归属」列（created_by / added_by）改判给占位账号，内容保留。
+ *    直接删会连带毁掉其他人的上下文 —— 删掉建群的人会让整个群和全部消息消失。
+ *  - 「成员关系」列（conversation_members / task_assignees / event_participants）
+ *    删除即可，已注销的用户本就不该继续是成员。这三张表本身是 ON DELETE CASCADE，
+ *    显式删只是为了让意图明确、不依赖 pragma 状态。
+ *
+ * 整体放在一个事务里：原先路由是 cleanupUserData() 和 deleteUser() 两次独立提交，
+ * 后者失败会留下已提交的半截修改（内容改判了但用户还在）。
+ */
+export function deleteUserAndReassignContent(userId: string): boolean {
+  if (userId === DELETED_USER_ID) {
+    throw new Error('不能删除「已注销用户」占位账号');
+  }
+  ensureDeletedPlaceholderUser();
+
+  const run = db.transaction(() => {
+    // 1) 归属改判，内容保留
+    db.prepare('UPDATE conversations SET created_by = ? WHERE created_by = ?').run(DELETED_USER_ID, userId);
+    db.prepare('UPDATE tasks         SET created_by = ? WHERE created_by = ?').run(DELETED_USER_ID, userId);
+    db.prepare('UPDATE events        SET created_by = ? WHERE created_by = ?').run(DELETED_USER_ID, userId);
+    db.prepare('UPDATE papers        SET added_by   = ? WHERE added_by   = ?').run(DELETED_USER_ID, userId);
+
+    // 2) 成员关系与个人附属数据清理
+    db.prepare('DELETE FROM conversation_members WHERE user_id = ?').run(userId);
+    db.prepare('DELETE FROM im_messages         WHERE sender_id = ?').run(userId);
+    db.prepare('DELETE FROM task_assignees      WHERE user_id = ?').run(userId);
+    db.prepare('DELETE FROM task_comments       WHERE user_id = ?').run(userId);
+    db.prepare('DELETE FROM event_participants  WHERE user_id = ?').run(userId);
+    db.prepare('DELETE FROM paper_notes         WHERE user_id = ?').run(userId);
+
+    // 3) 删除用户本体
+    return db.prepare('DELETE FROM users WHERE id = ?').run(userId).changes > 0;
+  });
+
+  return run();
+}
+
+/**
+ * @deprecated 请改用 deleteUserAndReassignContent()，它是原子的且会改判归属。
+ * 保留此函数仅为兼容旧调用点。
+ */
 export function cleanupUserData(userId: string): void {
   const cleanup = db.transaction(() => {
     db.prepare('DELETE FROM conversation_members WHERE user_id = ?').run(userId);

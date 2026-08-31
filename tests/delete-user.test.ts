@@ -1,25 +1,21 @@
 /**
- * 删除用户的完整链路 —— 这是第 2 批 #9 的守卫。
+ * 删除用户的完整链路 —— #9 的守卫。
  *
- * 【重要修正】#9 原本的前提「FK 未开启，需要补 PRAGMA foreign_keys = ON」是错的。
- * better-sqlite3 与 sqlite3 CLI 不同，开连接时默认就是 foreign_keys = 1
- * （已实测：new Database(':memory:').pragma('foreign_keys') === 1）。
- * 也就是说外键一直在生效，删用户的洞不是「潜在的」，而是【当前线上就坏的】：
- * DELETE /api/auth/users/:id 删一个建过群/加过文献/建过任务或日程的用户，
- * db.deleteUser 会抛 SQLITE_CONSTRAINT_FOREIGNKEY。
+ * 【前提修正】#9 原本写着「FK 未开启，需要补 PRAGMA foreign_keys = ON」，这是错的。
+ * better-sqlite3 与 sqlite3 CLI 相反，开连接时默认就是 foreign_keys = 1
+ * （已实测：new Database(':memory:').pragma('foreign_keys', {simple:true}) === 1）。
+ * 外键一直在生效，所以这不是隐患而是当前线上故障：
+ * DELETE /api/auth/users/:id 删一个建过群/加过文献的用户会抛
+ * SQLITE_CONSTRAINT_FOREIGNKEY，且 Express 4 不接 async handler 的 rejection，
+ * 请求会挂死不返回。
  *
- * 已实测 users 上共 10 个外键引用，其中 7 个是 ON DELETE NO ACTION（会阻塞删除）。
- * cleanupUserData 覆盖了 im_messages.sender_id / task_comments.user_id /
- * paper_notes.user_id，还漏着 4 个「归属」列：
- *   conversations.created_by / tasks.created_by / events.created_by / papers.added_by
- * 这 4 列正是要按「保留内容、改判给占位用户」处理的对象（第 2 批 #9）。
+ * 实测 users 上共 10 个外键引用，其中 7 个是 ON DELETE NO ACTION（阻塞删除）。
+ * 修复方式（Owner 裁决「保留」）：4 个归属列改判给占位账号 __deleted_user__，
+ * 内容保留；成员关系列照旧删除。
  *
- * 下面两个用例用 it.fails 标记：它们【现在必须抛错】。等 #9 落地、删除不再抛错时，
- * it.fails 会自己变红，强制把它们改回普通 it —— 不会出现修好了却没人发现的情况。
- *
- * 注意：db.ts 在模块加载时就把路径固定为 data/chat.db，没有注入点，
+ * 注意：db.ts 在模块加载时把路径硬编码为 data/chat.db，没有注入点，
  * 所以本测试直接跑在开发库上，靠 finally 自行清理。要彻底隔离需要让 db.ts
- * 支持 DB_PATH 环境变量 —— 那是独立一项。
+ * 支持 DB_PATH 环境变量 —— 列为独立一项。
  */
 import { describe, it, expect } from 'vitest';
 import { v4 as uuidv4 } from 'uuid';
@@ -40,26 +36,18 @@ function makeUser() {
   return id;
 }
 
-/** 复现 DELETE /api/auth/users/:id 的调用顺序 */
-function deleteUserLikeRoute(userId: string) {
-  db.cleanupUserData(userId);
-  db.blacklistUserTokens(userId);
-  return db.deleteUser(userId);
-}
-
 describe('删除用户', () => {
   it('删除一个干净的用户应成功', () => {
     const userId = makeUser();
     try {
-      expect(deleteUserLikeRoute(userId)).toBe(true);
+      expect(db.deleteUserAndReassignContent(userId)).toBe(true);
       expect(db.getUser(userId)).toBeFalsy();
     } finally {
-      db.deleteUser(userId);
+      db.getUser(userId) && db.deleteUser(userId);
     }
   });
 
-  // 当前必然抛 FOREIGN KEY constraint failed（papers.added_by 没被 cleanup 覆盖）
-  it.fails('删除一个添加过文献的用户应成功（#9 未修，当前抛错）', () => {
+  it('删除添加过文献的用户应成功，且文献保留并改判给占位账号', () => {
     const userId = makeUser();
     const paperId = `test-paper-${uuidv4()}`;
     const now = new Date().toISOString();
@@ -82,16 +70,20 @@ describe('删除用户', () => {
         updated_at: now,
       });
 
-      expect(deleteUserLikeRoute(userId)).toBe(true);
+      expect(db.deleteUserAndReassignContent(userId)).toBe(true);
       expect(db.getUser(userId)).toBeFalsy();
+
+      // 关键：文献没被删掉，归属改判给了占位账号
+      const paper = db.getPaper(paperId);
+      expect(paper).toBeTruthy();
+      expect(paper!.added_by).toBe(db.DELETED_USER_ID);
     } finally {
       db.deletePaper(paperId);
-      db.deleteUser(userId);
+      db.getUser(userId) && db.deleteUser(userId);
     }
   });
 
-  // 当前必然抛 FOREIGN KEY constraint failed（conversations.created_by 没被 cleanup 覆盖）
-  it.fails('删除一个建过群聊的用户应成功（#9 未修，当前抛错）', () => {
+  it('删除建过群聊的用户应成功，且群聊保留并改判给占位账号', () => {
     const userId = makeUser();
     const convId = `test-conv-${uuidv4()}`;
     const now = new Date().toISOString();
@@ -105,11 +97,33 @@ describe('删除用户', () => {
         created_at: now,
       });
 
-      expect(deleteUserLikeRoute(userId)).toBe(true);
+      expect(db.deleteUserAndReassignContent(userId)).toBe(true);
       expect(db.getUser(userId)).toBeFalsy();
+
+      // 关键：群没被删掉 —— 直接 DELETE 会让整个群和全部消息对其他成员消失
+      const conv = db.getConversation(convId);
+      expect(conv).toBeTruthy();
+      expect(conv!.created_by).toBe(db.DELETED_USER_ID);
     } finally {
       db.deleteConversation(convId);
-      db.deleteUser(userId);
+      db.getUser(userId) && db.deleteUser(userId);
     }
+  });
+
+  it('占位账号本身不可被删除', () => {
+    expect(() => db.deleteUserAndReassignContent(db.DELETED_USER_ID)).toThrow();
+    expect(() => db.deleteUser(db.DELETED_USER_ID)).toThrow();
+  });
+
+  it('占位账号不出现在用户列表里', () => {
+    // 否则它会出现在成员选择器和 Agent 的 list_users 结果中
+    expect(db.getAllUsers().some((u) => u.id === db.DELETED_USER_ID)).toBe(false);
+  });
+
+  it('占位账号无法登录', () => {
+    // password_hash 存的 '!' 不是合法 bcrypt hash，compare 恒为 false
+    const placeholder = db.getUser(db.DELETED_USER_ID);
+    expect(placeholder).toBeTruthy();
+    expect(placeholder!.password_hash).toBe('!');
   });
 });
