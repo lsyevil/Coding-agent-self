@@ -3,6 +3,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { AuthPayload } from '../auth.js';
 import * as db from '../db.js';
 import { displayNameOf } from '../presenters.js';
+import { asyncHandler } from '../async-handler.js';
 
 const router = Router();
 
@@ -49,7 +50,7 @@ router.post('/', (req, res) => {
 });
 
 // POST /api/papers/search (before /:id!)
-router.post('/search', async (req, res) => {
+router.post('/search', asyncHandler(async (req, res) => {
   const { query, maxResults = 10 } = req.body;
   if (!query?.trim()) return res.status(400).json({ error: '搜索词不能为空' });
   try {
@@ -61,7 +62,7 @@ router.post('/search', async (req, res) => {
   } catch (e: any) {
     res.status(500).json({ error: '搜索失败: ' + e.message });
   }
-});
+}));
 
 // GET /api/papers/:id
 router.get('/:id', (req, res) => {
@@ -140,7 +141,7 @@ router.delete('/:id/notes/:noteId', (req, res) => {
 });
 
 // POST /api/papers/:id/summarize
-router.post('/:id/summarize', async (req, res) => {
+router.post('/:id/summarize', asyncHandler(async (req, res) => {
   const paper = db.getPaper(req.params.id);
   if (!paper) return res.status(404).json({ error: '文献不存在' });
   try {
@@ -158,7 +159,7 @@ router.post('/:id/summarize', async (req, res) => {
   } catch (e: any) {
     res.status(500).json({ error: '综述生成失败: ' + e.message });
   }
-});
+}));
 
 function parseArxivXml(xml: string): Array<{ title: string; authors: string[]; abstract: string; url: string; doi: string | null; year: number | null; venue: string | null; source: string }> {
   const entries: any[] = [];

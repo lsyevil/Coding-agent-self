@@ -3,6 +3,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { AuthPayload } from '../auth.js';
 import * as db from '../db.js';
 import { toPublicUser, displayNameOf } from '../presenters.js';
+import { asyncHandler } from '../async-handler.js';
 
 const router = Router();
 
@@ -188,7 +189,7 @@ router.delete('/:id/members/:userId', (req, res) => {
 });
 
 // POST /api/conversations/:id/summarize — Agent 总结
-router.post('/:id/summarize', async (req, res) => {
+router.post('/:id/summarize', asyncHandler(async (req, res) => {
   const user = (req as any).user as AuthPayload;
   if (!db.isConversationMember(req.params.id, user.userId)) {
     return res.status(403).json({ error: '无权访问' });
@@ -231,6 +232,6 @@ router.post('/:id/summarize', async (req, res) => {
   } catch (e: any) {
     res.status(500).json({ error: '总结生成失败: ' + (e?.message || e) });
   }
-});
+}));
 
 export default router;

@@ -55,10 +55,11 @@ const MUTATIONS = [
   {
     name: '登录不拒绝已注销用户',
     file: 'server/routes/auth.ts',
-    from: `  if (user.deleted_at) {
-    return res.status(401).json({ error: '用户名或密码错误' });
-  }`,
-    to: '  // mutated: 不拒绝已注销用户',
+    // 缩进是 4 空格：login 的函数体被 asyncHandler(...) 包了一层。
+    from: `    if (user.deleted_at) {
+      return res.status(401).json({ error: '用户名或密码错误' });
+    }`,
+    to: '    // mutated: 不拒绝已注销用户',
     expectFail: '已注销用户即使密码正确也登录失败',
   },
   {
@@ -104,10 +105,28 @@ const MUTATIONS = [
   {
     name: '注册不归一非字符串口令（进 bcrypt 会挂起）',
     file: 'server/routes/auth.ts',
-    from: "  const password = typeof req.body?.password === 'string' ? req.body.password : '';",
-    to: "  const password = req.body?.password;",
+    // 前面补一个换行来锚住缩进：login 里那行是 4 空格缩进，2 空格的版本会被它当子串包含。
+    from: "\n  const password = typeof req.body?.password === 'string' ? req.body.password : '';",
+    to: "\n  const password = req.body?.password;",
     spec: 'tests/department.test.ts',
     expectFail: '注册时非字符串的密码返回 400',
+  },
+  {
+    name: 'login 的 username 不 trim / 不判类型',
+    file: 'server/routes/auth.ts',
+    // 锚点带上 login 专属的注释行：trimmedField(req.body?.username) 在 /register 里也有一份。
+    from: "    // 而看到的提示是「用户名或密码错误」—— 没有任何线索指向空格。\n    const username = trimmedField(req.body?.username);",
+    to: "    const username = req.body?.username;",
+    spec: 'tests/login-hardening.test.ts',
+    expectFail: 'username 首尾空格被 trim 掉，仍能登录成功',
+  },
+  {
+    name: 'login 的 password 不判 typeof（进 bcrypt 会打死进程）',
+    file: 'server/routes/auth.ts',
+    from: "    // 口令不 trim：首尾空格是合法口令内容。\n    const password = typeof req.body?.password === 'string' ? req.body.password : '';",
+    to: "    const password = req.body?.password;",
+    spec: 'tests/login-hardening.test.ts',
+    expectFail: 'password 传数字时答 400，不进 bcrypt',
   },
   {
     name: 'createUser 不归一空部门',
@@ -201,7 +220,8 @@ function repairDb() {
     // 必须**同时**按 username 过滤：走 HTTP 注册造出来的测试账号，id 是服务端生成的
     // uuid，只有 username 带前缀，只按 id 清扫会漏掉它们（已经漏过 10 个）。
     const WHERE =
-      "id LIKE 'test-user-%' OR id LIKE 'test-dept-%' OR username LIKE 'test-dept-%'";
+      "id LIKE 'test-user-%' OR id LIKE 'test-dept-%' OR id LIKE 'test-login-%' " +
+      "OR username LIKE 'test-dept-%' OR username LIKE 'test-login-%'";
     const leftover = db.prepare(`SELECT id FROM users WHERE ${WHERE}`).all();
     for (const u of leftover) {
       try { db.prepare('DELETE FROM users WHERE id = ?').run(u.id); } catch { /* 有引用就留着，后面报告 */ }
@@ -247,15 +267,16 @@ console.log('基线全绿 ✓\n');
 let allGood = true;
 for (const m of MUTATIONS) {
   restoreAll();
-  const src = readFileSync(m.file, 'utf-8');
-  // 锚点按目标文件的行尾风格改写后再匹配。
-  // 本仓库 core.autocrlf=true：入库是 LF，检出到工作区却是 CRLF，而本脚本读的是
-  // **工作区**文件。锚点里写死换行符的话，所有跨行锚点都会「找不到」——
-  // 那会被误读成「代码变了」，而真正的原因只是行尾。
+  // 匹配前把整个文件归一成 LF，锚点也一律按 LF 书写。
+  //
+  // 早先这里是「探测文件用不用 CRLF，再把锚点转成同一种」。那个做法有个盲点：
+  // 被脚本插入过内容的文件很可能 **CRLF 与 LF 混用**，于是按整文件猜出来的行尾
+  // 恰好在新插入的那几行上失配。已经真实踩过一次，报出来的是「变异点找不到」，
+  // 读着像代码变了，会把人带去完全错误的方向。归一之后行尾就彻底不参与匹配了。
   const LF = String.fromCharCode(10);
-  const eol = src.includes(String.fromCharCode(13) + LF) ? String.fromCharCode(13) + LF : LF;
-  const from = m.from.split(LF).join(eol);
-  const to = m.to.split(LF).join(eol);
+  const src = readFileSync(m.file, 'utf-8').split(String.fromCharCode(13) + LF).join(LF);
+  const from = m.from;
+  const to = m.to;
   // 锚点必须**唯一**：String.replace 只替换第一处，锚点撞车会静默改到别的地方，
   // 于是守卫其实没被摘掉，脚本却报告「守卫没有测试覆盖」—— 一次假阴性。
   // （已经踩过：`if (total > 0) {` 在 db.ts 里有两处。）

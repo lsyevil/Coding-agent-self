@@ -19,6 +19,7 @@ import eventsRouter from "./routes/events.js";
 import papersRouter from "./routes/papers.js";
 import { setupWebSocket } from "./ws.js";
 import { getVersionInfo } from "./version.js";
+import { asyncHandler } from "./async-handler.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -267,7 +268,7 @@ app.post("/api/chat/:sessionId/cancel", authMiddleware, (req, res) => {
   res.json({ success: true });
 });
 
-app.post("/api/chat", async (req, res) => {
+app.post("/api/chat", asyncHandler(async (req, res) => {
   const { sessionId, message, model, systemPrompt, cwd, permissionMode } = req.body;
 
   console.log(`\n[Chat] ========== 新请求 ==========`);
@@ -489,7 +490,7 @@ app.post("/api/chat", async (req, res) => {
     emit({ type: "done" });
     res.end();
   }
-});
+}));
 
 // ============= 生产环境静态托管 =============
 const distDir = path.join(__dirnameDir, "..", "dist");
@@ -502,6 +503,42 @@ if (fs.existsSync(distDir)) {
 } else {
   console.log("[Server] 开发模式：未检测到 dist/，仅启动 API 服务（请用 npm run dev 启动前端）");
 }
+
+// ============= 统一错误兜底 =============
+// asyncHandler 把 async handler 的 reject 转到这里。必须注册在**所有路由之后**，
+// 且必须带满 4 个参数 —— Express 靠参数个数区分错误中间件和普通中间件，
+// 少写一个 next 它就会被当成普通中间件，永远不会被调用。
+app.use((err: any, req: express.Request, res: express.Response, _next: express.NextFunction) => {
+  console.error(`[Error] ${req.method} ${req.originalUrl}`, err);
+
+  // SSE（/api/chat）在出错前就已经把响应头发出去了，此时不能再改状态码。
+  // 只能补发一个 error 事件让前端知道发生了什么，然后收尾。
+  if (res.headersSent) {
+    if (!res.writableEnded) {
+      try {
+        res.write(`data: ${JSON.stringify({ type: "error", error: "服务器内部错误" })}\n\n`);
+      } catch { /* 连接可能已经断了，忽略 */ }
+      res.end();
+    }
+    return;
+  }
+
+  // 刻意不回显 err.message：它可能带着 SQL 片段、文件路径或口令哈希。
+  res.status(500).json({ error: "服务器内部错误" });
+});
+
+// 进程级兜底。这一层**不是**用来替代 asyncHandler 的，而是防漏：
+// 以后任何人新增一个忘了包 asyncHandler 的 async handler，或者路由之外的异步代码
+// （定时器、WebSocket 回调）抛了没人接，都不该能把整个服务打死 ——
+// Node ≥15 默认 `--unhandled-rejections=throw`，不接就是进程退出。
+//
+// 只拦 unhandledRejection，**不拦 uncaughtException**：同步异常在 Express 里本来就会
+// 被路由到上面那个错误中间件；而真正逃到 uncaughtException 的说明进程状态已不可信，
+// 咽下去继续跑比退出更危险。
+process.on("unhandledRejection", (reason) => {
+  console.error("[Fatal] 未捕获的 Promise 拒绝（已拦下，进程继续运行）:", reason);
+  console.error("[Fatal] 这说明有 async handler 漏包 asyncHandler，请修掉，不要依赖这层兜底。");
+});
 
 app.set("trust proxy", true);
 

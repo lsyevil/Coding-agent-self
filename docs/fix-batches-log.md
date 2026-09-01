@@ -12,6 +12,11 @@
 | 第 1 批 | #1 #2 #12 #18 | ✅ 已完成并验证 |
 | 类型清零 | 补 dayjs + todo 校验 + EventCard 签名 | ✅ `tsc -b` 全绿,前端恢复可构建 |
 | **#9** | 删除用户挂死(线上故障,已提前处理) | ✅ 已完成并端到端验证 |
+| PR #2 | `/api/version` 部署版本自省端点 | ✅ 已合并 |
+| PR #3 | `build` 加入 `tsc -b`,类型错误不再带上线 | ✅ 已合并 |
+| PR #4 | 删除用户改为软删除(注销),保留内容与发言归属 | ✅ 已合并 |
+| PR #5 | 用户增加 `department` 字段,用于同名同事消歧 | ✅ 已合并 |
+| **登录端点崩溃 P0** | asyncHandler + 登录入参类型守卫 + 进程级兜底 | ✅ 已完成,四场景变异 + 15 项端到端验证 |
 | 第 2 批其余 | #3–#8 | ⬜ 未授权 |
 | 第 3 批 | #10 #11 #13 #15b #16 #17 | ⬜ 未授权 |
 | 第 4 批 | F1–F6 + P2-1..P2-6 | ⬜ 未授权 |
@@ -290,7 +295,86 @@ prebuild-install 有 Node 24 的预编译包。**该阻塞不存在**。
 
 1. `db.ts` 支持 `DB_PATH` 环境变量(测试隔离前置条件 —— 目前 DB 测试跑在开发库上)
 2. `messages` 表 schema 扩展以支持回放 `tool_calls`(A1 未做的部分)
-3. **Express 4 缺少统一的 async 错误捕获**。`#9` 只在删除用户那一个 handler 里补了
-   `try/catch`,但**所有 async handler 都有同样的问题** —— 任何未捕获异常都会让请求
-   挂死不返回,而不是回 500。应加一个 `asyncHandler` 包装或升级到 Express 5
+3. ~~**Express 4 缺少统一的 async 错误捕获**~~ —— **已完成**,见下节「登录端点崩溃」。
+   ⚠️ 这一条原先的描述是**错的**:写的是「让请求挂死不返回,而不是回 500」。
+   实测(Node v24.18.1)是**整个进程退出**,不是挂死。定级从体验问题上调为 P0 可用性缺陷。
 4. `dist/` 构建产物体积 1.35 MB(gzip 432 KB)未做分包
+
+---
+
+## 登录端点崩溃(P0,2026-08-31)
+
+### 现象
+
+一条**不需要任何凭证**的请求能让整个服务进程退出:
+
+```bash
+curl -X POST localhost:3000/api/auth/login \
+  -H 'Content-Type: application/json' \
+  -d '{"username":"admin","password":12345}'
+```
+
+复现两次,均为 `/api/health` 200 → 打这一条 → `/api/health` 000(连不上)。
+调用链:`server/routes/auth.ts` → `server/auth.ts:104` → `bcryptjs/index.js:252`
+抛 `Illegal arguments: number, string`。
+
+同一类问题在 `/api/auth/register`(`username` 传 `true`/对象/数组 → better-sqlite3
+绑定参数抛 `Invalid value`)和 `/api/chat`(`{"message":123}` → `message.slice()`)上都存在,
+后者需要认证,前者不需要。
+
+### 为什么之前没发现:先前的结论是错的
+
+技术债 #3 记的是「请求挂死不返回」。**这个结论来自 vitest 里的观察,而 vitest 会自己
+注册 `unhandledRejection` 处理器** —— 它把进程崩溃转成了一个挂起的请求。也就是说
+**在同进程内测试这类缺陷,结构上就看不见真实后果**,只会得到一个偏轻的定级。
+
+这是本次把回归测试改成**拉起真实子进程**的直接原因,不是风格偏好。
+
+### 修法:三层,每层都可独立证明是承重的
+
+| 层 | 位置 | 作用 |
+|---|---|---|
+| 入参类型守卫 | `server/routes/auth.ts` | 非字符串入参直接 400,而不是让它流到 bcrypt/SQLite |
+| `asyncHandler` + 错误中间件 | `server/async-handler.ts`、`server/index.ts` | async handler 的 reject 转成 500;SSE 已发头时改写流内错误事件 |
+| 进程级 `unhandledRejection` | `server/index.ts` | 兜住漏包 `asyncHandler` 的 handler,记日志但不退出 |
+
+三点实现细节值得记:
+
+- 错误中间件**必须写满 4 个参数**。Express 靠参数个数区分错误中间件和普通中间件,
+  少写一个 `next` 它会被当普通中间件,永远不被调用。
+- **只拦 `unhandledRejection`,不拦 `uncaughtException`**。同步异常本来就会被 Express
+  路由到错误中间件;真正逃到 `uncaughtException` 说明进程状态已不可信,咽下去继续跑
+  比退出更危险。
+- 错误响应**刻意不回显 `err.message`** —— 它可能带 SQL 片段、文件路径或口令哈希。
+
+### 顺手修掉的一个登录门槛
+
+`/register` 对 `username` 做了 trim,`/login` 没做。库里的 `username` 绝不带首尾空格,
+所以手机输入法或浏览器自动填充带出来的**一个尾随空格就让人永远登不进去**,而提示是
+「用户名或密码错误」—— 没有任何线索指向空格。已对齐。口令**不 trim**:首尾空格是
+合法口令内容。
+
+### 验证
+
+`npm run test:crash` 拉起真实子进程,逐层剥掉修复看行为是否退化:
+
+| 场景 | 剥掉的层 | 期望 |
+|---|---|---|
+| M0 | 无(基线) | 400,进程存活 |
+| M1 | 类型守卫 | 500,进程存活 |
+| M2 | + asyncHandler | 请求挂起,进程存活 |
+| M3 | + 进程兜底(= 修复前状态) | 连接失败,**进程已死** |
+
+**M3 必须复现原始崩溃**,否则这套断言是空的 —— 它证明的是「这三层里没有一层是
+装饰品」。四场景全部符合预期。
+
+其余:`tsc -b` 0 错误;`npm run build` 0 错误;vitest 49/49(含新增
+`tests/login-hardening.test.ts` 9 项);反向变异 20/20 守卫有测试覆盖;
+真实服务端到端 15/15。开发库核对完毕:仅剩 `admin` 与 `__deleted_user__`,
+`foreign_keys = 1`,孤儿行 0,残留测试账号 0。
+
+### 遗留
+
+`tests/login-hardening.test.ts` 的文档块里写明了它**能**证明什么(400/401 行为)和
+**不能**证明什么(服务是否存活),并指向 `npm run test:crash`。这个分工是刻意的,
+不要把崩溃类断言搬回 vitest。
