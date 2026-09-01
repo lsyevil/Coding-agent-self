@@ -18,6 +18,7 @@ import tasksRouter from "./routes/tasks.js";
 import eventsRouter from "./routes/events.js";
 import papersRouter from "./routes/papers.js";
 import { setupWebSocket } from "./ws.js";
+import { getVersionInfo } from "./version.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -32,7 +33,14 @@ registerBuiltinSkills();
 app.use(express.json());
 
 // ============= 认证保护（/api 下除公开接口外均需 JWT）=============
-const PUBLIC_API_PATHS = new Set(["/health", "/auth/login", "/auth/refresh"]);
+// /version 必须公开：部署校验发生在拿到 token 之前，要 JWT 就没法当部署门禁用。
+// 它只暴露 commit / 时间戳，不含任何配置或密钥。
+const PUBLIC_API_PATHS = new Set([
+  "/health",
+  "/version",
+  "/auth/login",
+  "/auth/refresh",
+]);
 app.use("/api", (req, res, next) => {
   if (PUBLIC_API_PATHS.has(req.path)) return next();
   return authMiddleware(req, res, next);
@@ -58,6 +66,14 @@ const __dirnameDir = __dirname;
 // ============= 健康检查 =============
 app.get("/api/health", (req, res) => {
   res.json({ status: "ok", timestamp: new Date().toISOString() });
+});
+
+// ============= 部署版本自省 =============
+// 部署不一致时回 503（而非 200 带个 ok:false），这样 `curl -f` 一条命令即可当门禁：
+// 退出码非零就是没部署成功，不需要调用方再解析 JSON。
+app.get("/api/version", (req, res) => {
+  const info = getVersionInfo();
+  res.status(info.ok ? 200 : 503).json(info);
 });
 
 // ============= 登录 / 配置状态 =============
