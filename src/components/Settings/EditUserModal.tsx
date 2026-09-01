@@ -1,16 +1,18 @@
 import { useState, useEffect } from 'react';
-import { Modal, Form, Input, Select, message } from 'antd';
+import { Modal, Form, Input, Select, AutoComplete, message } from 'antd';
 import { apiFetch } from '../../api/http';
 import type { UserInfo } from '../../api/auth';
 
 interface Props {
   open: boolean;
   user: UserInfo | null;
+  /** 现有部门去重后的候选值，供 AutoComplete 提示；由父组件从已加载的用户列表算出 */
+  departments: string[];
   onClose: () => void;
   onSuccess: () => void;
 }
 
-export function EditUserModal({ open, user, onClose, onSuccess }: Props) {
+export function EditUserModal({ open, user, departments, onClose, onSuccess }: Props) {
   const [form] = Form.useForm();
   const [loading, setLoading] = useState(false);
 
@@ -19,6 +21,9 @@ export function EditUserModal({ open, user, onClose, onSuccess }: Props) {
       form.setFieldsValue({
         displayName: user.displayName,
         role: user.role,
+        // 未填部门时回填空串而不是 undefined：undefined 会让 AutoComplete 变成
+        // 非受控，之后清空输入框就提交不出「清空部门」这个意图。
+        department: user.department ?? '',
       });
     }
   }, [open, user, form]);
@@ -31,6 +36,9 @@ export function EditUserModal({ open, user, onClose, onSuccess }: Props) {
       const body: any = {
         displayName: values.displayName,
         role: values.role,
+        // 一律带上（哪怕是空串）：服务端把空串当成「清空部门」，
+        // 只在有值时才发的话，管理员就永远删不掉一个填错的部门。
+        department: values.department ?? '',
       };
       if (values.password) body.password = values.password;
 
@@ -74,6 +82,16 @@ export function EditUserModal({ open, user, onClose, onSuccess }: Props) {
             { label: '普通成员', value: 'member' },
             { label: '管理员', value: 'admin' },
           ]} />
+        </Form.Item>
+        <Form.Item name="department" label={'部门（可选）'}>
+          <AutoComplete
+            filterOption={(input, option) =>
+              String(option?.value ?? '').toLowerCase().includes(input.toLowerCase())
+            }
+            options={departments.map((d) => ({ value: d }))}
+            placeholder={'用于区分同名同事，如：技术部'}
+            allowClear
+          />
         </Form.Item>
         <Form.Item name="password" label={'新密码（留空不修改）'}>
           <Input.Password placeholder={'留空则不修改密码'} />

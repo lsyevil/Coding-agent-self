@@ -1,14 +1,16 @@
 import { useState } from 'react';
-import { Modal, Form, Input, Select, message } from 'antd';
+import { Modal, Form, Input, Select, AutoComplete, message } from 'antd';
 import { registerUser } from '../../api/auth';
 
 interface Props {
   open: boolean;
+  /** 现有部门去重后的候选值，供 AutoComplete 提示；由父组件从已加载的用户列表算出 */
+  departments: string[];
   onClose: () => void;
   onSuccess: () => void;
 }
 
-export function CreateUserModal({ open, onClose, onSuccess }: Props) {
+export function CreateUserModal({ open, departments, onClose, onSuccess }: Props) {
   const [form] = Form.useForm();
   const [loading, setLoading] = useState(false);
 
@@ -21,6 +23,7 @@ export function CreateUserModal({ open, onClose, onSuccess }: Props) {
         password: values.password,
         displayName: values.displayName,
         role: values.role || 'member',
+        department: values.department,
       });
       message.success('用户创建成功');
       form.resetFields();
@@ -66,6 +69,17 @@ export function CreateUserModal({ open, onClose, onSuccess }: Props) {
           rules={[{ required: true, message: '请输入显示名' }]}
         >
           <Input placeholder="输入显示名称" />
+        </Form.Item>
+        <Form.Item name="department" label="部门（可选）">
+          <AutoComplete
+            // filterOption 打开才会随输入过滤；默认的 AutoComplete 不过滤，
+            // 部门一多就变成一长串跟输入无关的候选。
+            filterOption={(input, option) =>
+              String(option?.value ?? '').toLowerCase().includes(input.toLowerCase())
+            }
+            options={departments.map((d) => ({ value: d }))}
+            placeholder="用于区分同名同事，如：技术部"
+          />
         </Form.Item>
         <Form.Item name="role" label="角色" initialValue="member">
           <Select

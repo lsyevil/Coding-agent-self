@@ -62,6 +62,14 @@ export function UserManagement() {
     }
   };
 
+  // 部门候选值直接从已加载的用户列表里去重得来，不再单独开一个接口：
+  // 这份数据本来就在手上，另开接口只会多一次请求和一处可能不一致的来源。
+  // AutoComplete 的作用是把「技术部 / 技术 / 研发部」这类拼写分叉挡在输入之前 ——
+  // 部门是自由文本，没有约束能挡，只能靠让「选已有的」比「敲新的」更省事。
+  const departments = Array.from(
+    new Set(users.map((u) => u.department).filter((d): d is string => !!d))
+  ).sort((a, b) => a.localeCompare(b, 'zh-Hans-CN'));
+
   const columns = [
     {
       title: '用户名',
@@ -72,6 +80,14 @@ export function UserManagement() {
       title: '显示名',
       dataIndex: 'displayName',
       key: 'displayName',
+    },
+    {
+      title: '部门',
+      dataIndex: 'department',
+      key: 'department',
+      width: 140,
+      render: (department: string | null) =>
+        department || <span style={{ color: '#bfbfbf' }}>{'—'}</span>,
     },
     {
       title: '角色',
@@ -165,10 +181,16 @@ export function UserManagement() {
         // 已注销的行整体降低对比度，避免管理员在长列表里把它当成在职同事。
         rowClassName={(record) => (record.deletedAt ? 'user-row-deleted' : '')}
       />
-      <CreateUserModal open={modalOpen} onClose={() => setModalOpen(false)} onSuccess={() => loadUsers()} />
+      <CreateUserModal
+        open={modalOpen}
+        departments={departments}
+        onClose={() => setModalOpen(false)}
+        onSuccess={() => loadUsers()}
+      />
       <EditUserModal
         open={editOpen}
         user={editUser}
+        departments={departments}
         onClose={() => {
           setEditOpen(false);
           setEditUser(null);

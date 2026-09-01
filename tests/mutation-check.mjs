@@ -10,6 +10,9 @@ import Database from 'better-sqlite3';
 
 const FILES = ['server/db.ts', 'server/routes/auth.ts', 'server/presenters.ts'];
 
+/** 变异默认针对哪个 spec。带 spec 字段的变异点单独指定，避免每轮都跑无关用例。 */
+const DEFAULT_SPEC = 'tests/soft-delete.test.ts';
+
 const MUTATIONS = [
   {
     name: 'getAllUsers 默认不过滤已注销用户',
@@ -72,6 +75,100 @@ const MUTATIONS = [
     to: '    displayName: u.display_name,',
     expectFail: '内容面加「（已注销）」后缀，账号面不加',
   },
+
+  // ===== 以下是 department（同名消歧）这一批的守卫 =====
+  {
+    name: 'trimmedField 不 trim',
+    file: 'server/routes/auth.ts',
+    from: "  return typeof v === 'string' ? v.trim() : '';",
+    to: "  return typeof v === 'string' ? v : '';",
+    spec: 'tests/department.test.ts',
+    expectFail: '注册时全是空格的显示名被拒绝',
+  },
+  {
+    name: 'trimmedField 不判 typeof（非字符串会让请求永久挂起）',
+    file: 'server/routes/auth.ts',
+    from: "  return typeof v === 'string' ? v.trim() : '';",
+    to: "  return v.trim();",
+    spec: 'tests/department.test.ts',
+    expectFail: '注册时非字符串的显示名返回 400',
+  },
+  {
+    name: '注册不校验必填项',
+    file: 'server/routes/auth.ts',
+    from: "  if (!username || !password || !displayName) {",
+    to: "  if (false) {",
+    spec: 'tests/department.test.ts',
+    expectFail: '注册时全是空格的显示名被拒绝',
+  },
+  {
+    name: '注册不归一非字符串口令（进 bcrypt 会挂起）',
+    file: 'server/routes/auth.ts',
+    from: "  const password = typeof req.body?.password === 'string' ? req.body.password : '';",
+    to: "  const password = req.body?.password;",
+    spec: 'tests/department.test.ts',
+    expectFail: '注册时非字符串的密码返回 400',
+  },
+  {
+    name: 'createUser 不归一空部门',
+    file: 'server/db.ts',
+    from: "    user.department?.trim() || null,",
+    to: "    user.department ?? null,",
+    spec: 'tests/department.test.ts',
+    expectFail: 'createUser 把空串和纯空格的部门都归一成 null',
+  },
+  {
+    name: 'PATCH 不校验显示名非空',
+    file: 'server/routes/auth.ts',
+    from: "    if (!trimmedName) return res.status(400).json({ error: '显示名不能为空' });",
+    to: "    /* mutated: 不校验 */",
+    spec: 'tests/department.test.ts',
+    expectFail: 'PATCH 的显示名全是空格被拒绝',
+  },
+  {
+    name: 'PATCH 的空串部门不归一成 null',
+    file: 'server/routes/auth.ts',
+    from: "    updates.department = trimmedField(req.body.department) || null;",
+    to: "    updates.department = trimmedField(req.body.department);",
+    spec: 'tests/department.test.ts',
+    expectFail: 'PATCH 传空串部门表示清空',
+  },
+  {
+    name: 'PATCH 的口令校验被挪到 DB 写之后（半更新）',
+    file: 'server/routes/auth.ts',
+    from: `  if (password !== undefined && (typeof password !== 'string' || password === '')) {
+    return res.status(400).json({ error: '密码必须是非空字符串' });
+  }
+
+  if (Object.keys(updates).length > 0) {
+    db.updateUser(user.id, updates);
+  }`,
+    to: `  if (Object.keys(updates).length > 0) {
+    db.updateUser(user.id, updates);
+  }
+
+  if (password !== undefined && (typeof password !== 'string' || password === '')) {
+    return res.status(400).json({ error: '密码必须是非空字符串' });
+  }`,
+    spec: 'tests/department.test.ts',
+    expectFail: 'PATCH 的非法密码被拒绝时',
+  },
+  {
+    name: 'toAccountUser 不归一空串部门',
+    file: 'server/presenters.ts',
+    from: "    department: u.department || null,",
+    to: "    department: u.department,",
+    spec: 'tests/department.test.ts',
+    expectFail: '账号面把空串部门也报成 null',
+  },
+  {
+    name: 'toPublicUser 也带上了 department（内容面不该有）',
+    file: 'server/presenters.ts',
+    from: "    avatar: u.avatar,\n    deleted,",
+    to: "    avatar: u.avatar,\n    department: u.department,\n    deleted,",
+    spec: 'tests/department.test.ts',
+    expectFail: '账号面带 department，内容面刻意不带',
+  },
 ];
 
 /** 自行建立备份。不能依赖外部预先准备好 .bak —— 那样别人克隆下来第一次就跑不通。 */
@@ -101,21 +198,25 @@ function repairDb() {
   try {
     const r = db.prepare("UPDATE users SET deleted_at = NULL WHERE role = 'admin' AND deleted_at IS NOT NULL").run();
     db.prepare("DELETE FROM token_blacklist WHERE jti LIKE 'user_deleted_%'").run();
-    const leftover = db.prepare("SELECT id FROM users WHERE id LIKE 'test-user-%'").all();
+    // 必须**同时**按 username 过滤：走 HTTP 注册造出来的测试账号，id 是服务端生成的
+    // uuid，只有 username 带前缀，只按 id 清扫会漏掉它们（已经漏过 10 个）。
+    const WHERE =
+      "id LIKE 'test-user-%' OR id LIKE 'test-dept-%' OR username LIKE 'test-dept-%'";
+    const leftover = db.prepare(`SELECT id FROM users WHERE ${WHERE}`).all();
     for (const u of leftover) {
       try { db.prepare('DELETE FROM users WHERE id = ?').run(u.id); } catch { /* 有引用就留着，后面报告 */ }
     }
     if (r.changes > 0) console.log(`   (已修复被变异注销的管理员 ×${r.changes})`);
-    const stillThere = db.prepare("SELECT COUNT(*) n FROM users WHERE id LIKE 'test-user-%'").get().n;
-    if (stillThere > 0) console.log(`   ⚠ 开发库里残留 ${stillThere} 个 test-user-*，需人工清理`);
+    const stillThere = db.prepare(`SELECT COUNT(*) n FROM users WHERE ${WHERE}`).get().n;
+    if (stillThere > 0) console.log(`   ⚠ 开发库里残留 ${stillThere} 个测试用户，需人工清理`);
   } finally {
     db.close();
   }
 }
 
-function runTests() {
+function runTests(spec = DEFAULT_SPEC) {
   try {
-    const out = execSync('npx vitest run tests/soft-delete.test.ts --reporter=basic', {
+    const out = execSync(`npx vitest run ${spec} --reporter=basic`, {
       encoding: 'utf-8',
       stdio: ['ignore', 'pipe', 'pipe'],
     });
@@ -133,11 +234,13 @@ process.on('SIGINT', () => process.exit(130));
 
 repairDb();
 console.log('=== 基线：未变异时必须全绿 ===');
-const baseline = runTests();
-if (baseline.failed) {
-  console.error('基线就是红的，变异验证无意义。先修测试。');
-  console.error(baseline.out.slice(-3000));
-  process.exit(1);
+for (const spec of new Set(MUTATIONS.map((m) => m.spec || DEFAULT_SPEC))) {
+  const baseline = runTests(spec);
+  if (baseline.failed) {
+    console.error(`基线就是红的（${spec}），变异验证无意义。先修测试。`);
+    console.error(baseline.out.slice(-3000));
+    process.exit(1);
+  }
 }
 console.log('基线全绿 ✓\n');
 
@@ -145,10 +248,18 @@ let allGood = true;
 for (const m of MUTATIONS) {
   restoreAll();
   const src = readFileSync(m.file, 'utf-8');
+  // 锚点按目标文件的行尾风格改写后再匹配。
+  // 本仓库 core.autocrlf=true：入库是 LF，检出到工作区却是 CRLF，而本脚本读的是
+  // **工作区**文件。锚点里写死换行符的话，所有跨行锚点都会「找不到」——
+  // 那会被误读成「代码变了」，而真正的原因只是行尾。
+  const LF = String.fromCharCode(10);
+  const eol = src.includes(String.fromCharCode(13) + LF) ? String.fromCharCode(13) + LF : LF;
+  const from = m.from.split(LF).join(eol);
+  const to = m.to.split(LF).join(eol);
   // 锚点必须**唯一**：String.replace 只替换第一处，锚点撞车会静默改到别的地方，
   // 于是守卫其实没被摘掉，脚本却报告「守卫没有测试覆盖」—— 一次假阴性。
   // （已经踩过：`if (total > 0) {` 在 db.ts 里有两处。）
-  const occurrences = src.split(m.from).length - 1;
+  const occurrences = src.split(from).length - 1;
   if (occurrences === 0) {
     console.log(`✗ [${m.name}] 变异点在 ${m.file} 中找不到 —— 代码已变，需更新本脚本`);
     allGood = false;
@@ -159,9 +270,9 @@ for (const m of MUTATIONS) {
     allGood = false;
     continue;
   }
-  writeFileSync(m.file, src.replace(m.from, m.to));
+  writeFileSync(m.file, src.replace(from, to));
 
-  const r = runTests();
+  const r = runTests(m.spec || DEFAULT_SPEC);
   restoreAll();
   repairDb();
 
