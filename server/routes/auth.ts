@@ -10,57 +10,74 @@ import {
 } from '../auth.js';
 
 import { toAccountUser } from '../presenters.js';
+import { asyncHandler } from '../async-handler.js';
 
 const router = Router();
 
 /**
  * 取请求体里的字符串字段，trim 后返回；非字符串一律当作「没填」返回空串。
  *
- * 必须先判 typeof 再 trim，不能直接 `req.body.x.trim()`：
- * Express 4 **不接管 async handler 的 reject**，`{ displayName: 123 }` 这样的请求体
- * 会让 .trim() 抛 TypeError，然后这个请求**永久挂起**（连 500 都不会返回）。
+ * 必须先判 typeof 再 trim，不能直接 `req.body.x.trim()`：`{ displayName: 123 }`
+ * 这样的请求体会让 .trim() 抛 TypeError。asyncHandler 现在会把它兜成 500，
+ * 但仍然要在这里判 —— 「传错类型」的正确答复是 400（请求本身有问题），
+ * 不是 500（服务端有问题）。
  */
 function trimmedField(v: unknown): string {
   return typeof v === 'string' ? v.trim() : '';
 }
 
 // POST /api/auth/login
-router.post('/login', async (req, res) => {
-  const { username, password } = req.body;
-  if (!username || !password) {
-    return res.status(400).json({ error: '请输入用户名和密码' });
-  }
+router.post(
+  '/login',
+  asyncHandler(async (req, res) => {
+    // 必须判 typeof 而不是只判真假值。两个字段各有一条崩溃路径，且都过得了 `!x`：
+    //  - password 传数字 → bcrypt 抛 `Illegal arguments: number, string`
+    //  - username 传 true / 对象 / 数组 → better-sqlite3 绑定参数时抛 `Invalid value`
+    // 这个端点在 PUBLIC_API_PATHS 里，**不需要凭证就能打**，所以这两条是
+    // 任何人一条 curl 就能触发的。asyncHandler 兜底之后不再打死进程，
+    // 但这里判掉才能给出正确的 400 而不是 500。
+    // username 必须 trim，且必须与 /register 的处理**保持一致** —— 注册时用的是
+    // trimmedField()，库里的 username 绝不会带首尾空格。登录这边不 trim 的话，
+    // 手机输入法或浏览器自动填充带出来的一个尾随空格就让人永远登不进去，
+    // 而看到的提示是「用户名或密码错误」—— 没有任何线索指向空格。
+    const username = trimmedField(req.body?.username);
+    // 口令不 trim：首尾空格是合法口令内容。
+    const password = typeof req.body?.password === 'string' ? req.body.password : '';
+    if (!username || !password) {
+      return res.status(400).json({ error: '请输入用户名和密码' });
+    }
 
-  const user = db.getUserByUsername(username);
-  if (!user) {
-    return res.status(401).json({ error: '用户名或密码错误' });
-  }
+    const user = db.getUserByUsername(username);
+    if (!user) {
+      return res.status(401).json({ error: '用户名或密码错误' });
+    }
 
-  const valid = await verifyPassword(password, user.password_hash);
-  if (!valid) {
-    return res.status(401).json({ error: '用户名或密码错误' });
-  }
+    const valid = await verifyPassword(password, user.password_hash);
+    if (!valid) {
+      return res.status(401).json({ error: '用户名或密码错误' });
+    }
 
-  // 已注销用户不允许登录。
-  //
-  // 这个检查刻意放在**密码校验之后**，且错误文案与密码错误**完全一致**：
-  //  - 文案一致 → 攻击者无法通过报错内容判断某个用户名是否存在/已注销；
-  //  - 放在之后 → 也不能通过响应耗时判断（跳过 bcrypt 会快一个数量级，
-  //    那本身就是个可用的用户名枚举信道）。
-  // 代价是被注销的本人也只看到「用户名或密码错误」，需要问管理员 —— 小团队场景可接受。
-  //
-  // 另外，这个拒绝**必须写在路由层**：不能下沉到 db.getUserByUsername() 里过滤，
-  // 因为注册查重复用同一个函数、且必须能看见已注销用户占用的 username。详见该函数注释。
-  if (user.deleted_at) {
-    return res.status(401).json({ error: '用户名或密码错误' });
-  }
+    // 已注销用户不允许登录。
+    //
+    // 这个检查刻意放在**密码校验之后**，且错误文案与密码错误**完全一致**：
+    //  - 文案一致 → 攻击者无法通过报错内容判断某个用户名是否存在/已注销；
+    //  - 放在之后 → 也不能通过响应耗时判断（跳过 bcrypt 会快一个数量级，
+    //    那本身就是个可用的用户名枚举信道）。
+    // 代价是被注销的本人也只看到「用户名或密码错误」，需要问管理员 —— 小团队场景可接受。
+    //
+    // 另外，这个拒绝**必须写在路由层**：不能下沉到 db.getUserByUsername() 里过滤，
+    // 因为注册查重复用同一个函数、且必须能看见已注销用户占用的 username。详见该函数注释。
+    if (user.deleted_at) {
+      return res.status(401).json({ error: '用户名或密码错误' });
+    }
 
-  const token = generateToken(user);
-  res.json({ token, user: toAccountUser(user) });
-});
+    const token = generateToken(user);
+    res.json({ token, user: toAccountUser(user) });
+  })
+);
 
 // POST /api/auth/register — 仅管理员可注册新用户（小团队场景）
-router.post('/register', authMiddleware, async (req, res) => {
+router.post('/register', authMiddleware, asyncHandler(async (req, res) => {
   const currentUser = (req as any).user as AuthPayload;
   if (currentUser.role !== 'admin') {
     return res.status(403).json({ error: '仅管理员可创建用户' });
@@ -108,7 +125,7 @@ router.post('/register', authMiddleware, async (req, res) => {
   });
 
   res.json({ user: toAccountUser(user) });
-});
+}));
 
 // GET /api/auth/me — 获取当前用户信息
 router.get('/me', authMiddleware, (req, res) => {
@@ -142,7 +159,7 @@ router.get('/users', authMiddleware, (req, res) => {
 });
 
 // PATCH /api/auth/users/:id — 更新用户（仅 admin）
-router.patch('/users/:id', authMiddleware, async (req, res) => {
+router.patch('/users/:id', authMiddleware, asyncHandler(async (req, res) => {
   const currentUser = (req as any).user as AuthPayload;
   if (currentUser.role !== 'admin') {
     return res.status(403).json({ error: '仅管理员可操作' });
@@ -186,7 +203,7 @@ router.patch('/users/:id', authMiddleware, async (req, res) => {
 
   const updated = db.getUser(user.id);
   res.json({ user: toAccountUser(updated!) });
-});
+}));
 
 // DELETE /api/auth/users/:id — 注销用户（仅 admin，不能删自己）
 //
@@ -194,7 +211,7 @@ router.patch('/users/:id', authMiddleware, async (req, res) => {
 //  - 0 条关联数据（误建、从没用过的账号）→ 真删除，库里不留痕迹；
 //  - 有关联数据 → 注销（软删除），内容和发言归属全部保留，可在用户管理页恢复。
 // 响应里的 mode 字段告诉前端实际发生了哪一种，以便提示文案对得上。
-router.delete('/users/:id', authMiddleware, async (req, res) => {
+router.delete('/users/:id', authMiddleware, asyncHandler(async (req, res) => {
   const currentUser = (req as any).user as AuthPayload;
   if (currentUser.role !== 'admin') {
     return res.status(403).json({ error: '仅管理员可操作' });
@@ -239,7 +256,7 @@ router.delete('/users/:id', authMiddleware, async (req, res) => {
     console.error('[Auth] 注销用户失败:', e?.message || e);
     res.status(500).json({ error: '注销用户失败：' + (e?.message || '未知错误') });
   }
-});
+}));
 
 // POST /api/auth/users/:id/restore — 恢复已注销用户（仅 admin）
 router.post('/users/:id/restore', authMiddleware, (req, res) => {
