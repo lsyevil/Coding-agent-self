@@ -1,6 +1,7 @@
 import { Skill, ToolDefinition, SkillContext } from '../base.js';
 import * as db from '../../db.js';
 import { v4 as uuidv4 } from 'uuid';
+import { displayNameOf } from '../../presenters.js';
 
 // tasks 表对 priority / status 都带 CHECK 约束。工具入参来自模型，
 // 即使 schema 里声明了 enum 也可能收到别的值 —— 不校验就会在写库时抛
@@ -129,7 +130,7 @@ export class TodoSkill implements Skill {
     }
 
     const assignees = db.getTaskAssignees(task.id);
-    const assigneeNames = assignees.map((u: any) => u.display_name).join(', ');
+    const assigneeNames = assignees.map(displayNameOf).join(', ');
     return '\u2705 \u4efb\u52a1\u5df2\u521b\u5efa\uff1a\u300c' + title + '\u300d\n\u8d1f\u8d23\u4eba\uff1a' + assigneeNames + '\n\u4f18\u5148\u7ea7\uff1a' + priority;
   }
 
@@ -145,7 +146,7 @@ export class TodoSkill implements Skill {
     if (tasks.length === 0) return '\u6ca1\u6709\u627e\u5230\u7b26\u5408\u6761\u4ef6\u7684\u4efb\u52a1\u3002';
 
     const lines = tasks.map((t: any) => {
-      const assignees = db.getTaskAssignees(t.id).map((u: any) => u.display_name).join(', ');
+      const assignees = db.getTaskAssignees(t.id).map(displayNameOf).join(', ');
       return '- [' + t.status + '] ' + t.title + ' (priority: ' + t.priority + ', assignees: ' + (assignees || 'none') + ')';
     });
     return '\u627e\u5230 ' + tasks.length + ' \u4e2a\u4efb\u52a1\uff1a\n' + lines.join('\n');
@@ -157,7 +158,7 @@ export class TodoSkill implements Skill {
     if (users.length === 0) return '没有可分配的团队成员。';
 
     const lines = users.map((u: any) => 
-      `- ${u.display_name}（ID: ${u.id}，用户名: ${u.username}）`
+      `- ${displayNameOf(u)}（ID: ${u.id}，用户名: ${u.username}）`
     );
     return '团队成员列表：\n' + lines.join('\n');
   }
