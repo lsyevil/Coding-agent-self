@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Modal, Form, Input, DatePicker, TimePicker, Switch, Select, message, Alert } from 'antd';
 import { apiFetch } from '../../api/http';
+import { userPickerLabel } from '../../utils/user';
 import { useEventStore } from '../../stores/eventStore';
 import dayjs from 'dayjs';
 
@@ -8,6 +9,8 @@ interface UserOption {
   id: string;
   username: string;
   displayName: string;
+  /** 部门，null = 未填。用于同名消歧，见 userPickerLabel */
+  department?: string | null;
 }
 
 interface Props {
@@ -148,7 +151,7 @@ export function NewEventModal({ open, onClose, defaultDate }: Props) {
           <Select
             mode="multiple"
             placeholder="选择参与人"
-            options={users.map((u) => ({ label: u.displayName, value: u.id }))}
+            options={users.map((u) => ({ label: userPickerLabel(u), value: u.id }))}
           />
         </Form.Item>
       </Form>

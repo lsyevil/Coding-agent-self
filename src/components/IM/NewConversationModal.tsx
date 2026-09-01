@@ -8,6 +8,8 @@ interface UserOption {
   id: string;
   username: string;
   displayName: string;
+  /** 部门，null = 未填。用于同名消歧 */
+  department?: string | null;
 }
 
 interface Props {
@@ -120,7 +122,15 @@ export function NewConversationModal({ open, onClose, onCreate }: Props) {
                 >
                   <Checkbox checked={checked} />
                   <span>{u.displayName}</span>
-                  <Text type="secondary" style={{ fontSize: 12 }}>@{u.username}</Text>
+                  {/*
+                    有部门就显示部门，否则退回原来的 @用户名。
+                    不能只留部门就完事：现存用户的部门全是空的，那样这个列表在
+                    「两个张三」面前会连唯一的区分手段都没有 —— 消歧功能反而净减少。
+                    部门填上之后它自然让位，因为部门才是人看得懂的那个答案。
+                  */}
+                  <Text type="secondary" style={{ fontSize: 12 }}>
+                    {u.department || `@${u.username}`}
+                  </Text>
                 </div>
               );
             })}

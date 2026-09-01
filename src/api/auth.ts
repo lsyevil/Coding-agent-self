@@ -23,6 +23,8 @@ export interface RegisterData {
   password: string;
   displayName: string;
   role?: 'admin' | 'member';
+  /** 部门，可不填；服务端会 trim，空串存成 null */
+  department?: string;
 }
 
 export interface UserInfo {
@@ -31,6 +33,11 @@ export interface UserInfo {
   displayName: string;
   role: 'admin' | 'member';
   avatar: string | null;
+  /**
+   * 部门，null = 未填。仅用于同名消歧的展示，选人器里拼成「张三 · 技术部」。
+   * 拼接在前端做，与「（已注销）」后缀在服务端做相反 —— 原因见 server/presenters.ts。
+   */
+  department?: string | null;
   /**
    * 注销时间，null = 在职。
    *

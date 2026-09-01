@@ -73,6 +73,12 @@ db.exec(`
     display_name TEXT NOT NULL,
     role TEXT NOT NULL DEFAULT 'member' CHECK (role IN ('admin', 'member')),
     avatar TEXT,
+    -- 部门。NULL 或空串 = 未填。
+    -- 存在的理由是同名消歧：小团队里「张三」可能有两个，选人器只给显示名就选不对人。
+    -- 刻意用自由文本而不是独立的 departments 表 + 外键：这是个纯展示用的消歧标签，
+    -- 没有层级、没有权限、不参与任何查询条件；建表就得配一整套增删改管理界面，
+    -- 而收益只是把拼写不一致挡住 —— 前端用已有值做 AutoComplete 已经能挡住绝大部分。
+    department TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
     -- 注销时间。NULL = 在职。
@@ -234,6 +240,19 @@ try {
   // 忽略错误（列可能已存在）
 }
 
+// 数据库迁移：为旧库补充 users.department 列（同名消歧）
+try {
+  const userCols = db.prepare('PRAGMA table_info(users)').all() as Array<{ name: string }>;
+  if (!userCols.some((col) => col.name === 'department')) {
+    // 可空、无默认值：现存用户全部视为未填部门（NULL），选人器就退回只显示姓名，
+    // 与加这一列之前的行为完全一致 —— 迁移不需要任何数据回填。
+    db.exec('ALTER TABLE users ADD COLUMN department TEXT');
+    console.log('[DB] 已为 users 表添加 department 列（部门）');
+  }
+} catch (e) {
+  // 忽略错误（列可能已存在）
+}
+
 /**
  * 检查有多少内容的归属已被旧版删除逻辑改判到占位账号上。
  *
@@ -303,6 +322,8 @@ export interface DbUser {
   display_name: string;
   role: 'admin' | 'member';
   avatar: string | null;
+  /** 部门，仅用于同名消歧的展示；null 或空串 = 未填 */
+  department: string | null;
   created_at: string;
   updated_at: string;
   /** 注销时间；null = 在职 */
@@ -404,12 +425,13 @@ export function createUser(user: {
   display_name: string;
   role?: 'admin' | 'member';
   avatar?: string | null;
+  department?: string | null;
   created_at: string;
   updated_at: string;
 }): DbUser {
   db.prepare(`
-    INSERT INTO users (id, username, password_hash, display_name, role, avatar, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO users (id, username, password_hash, display_name, role, avatar, department, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     user.id,
     user.username,
@@ -417,6 +439,9 @@ export function createUser(user: {
     user.display_name,
     user.role || 'member',
     user.avatar ?? null,
+    // 空串归一成 NULL：否则「未填」会有两种表示，去重出来的部门候选列表里会冒出一个
+    // 空选项，前端判空也得两种都判。
+    user.department?.trim() || null,
     user.created_at,
     user.updated_at
   );
@@ -1169,7 +1194,7 @@ export function setSystemConfig(key: string, value: string): void {
 
 // ============= 用户管理扩展 =============
 
-export function updateUser(id: string, updates: Partial<Pick<DbUser, 'display_name' | 'role' | 'avatar'>>): boolean {
+export function updateUser(id: string, updates: Partial<Pick<DbUser, 'display_name' | 'role' | 'avatar' | 'department'>>): boolean {
   const fields: string[] = [];
   const values: any[] = [];
   for (const [key, val] of Object.entries(updates)) {

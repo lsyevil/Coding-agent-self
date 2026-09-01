@@ -36,6 +36,15 @@ export interface AccountUser {
   displayName: string;
   role: string;
   avatar: string | null;
+  /**
+   * 部门；null = 未填。
+   *
+   * 作为独立字段返回、由前端自己拼成「张三 · 技术部」，这**刻意与「（已注销）」后缀相反**：
+   * 后缀必须在服务端拼死，因为漏掉任何一处渲染都会把离职同事显示成在职（是错误信息）；
+   * 而部门是看场合的辅助信息，拼进 displayName 会让消息气泡变成
+   * 「张三 · 技术部: 你好」，在不需要消歧的地方全是噪音。
+   */
+  department: string | null;
   /** ISO 时间串；null = 在职。 */
   deletedAt: string | null;
 }
@@ -61,10 +70,14 @@ export function toPublicUser(u: DbUser): PublicUser {
 }
 
 /**
- * 账号面的用户表示：**不加后缀**，带 role 和 deletedAt。
+ * 账号面的用户表示：**不加后缀**，带 role、department 和 deletedAt。
  *
  * 命名不叫 toAdminUser，是因为它同时服务 GET /auth/me —— 那不是管理员专属接口。
- * 字段是原 toSafeUser 的超集（多一个 deletedAt），所以替换掉 toSafeUser 时前端无需改动。
+ * 字段是原 toSafeUser 的超集，所以替换掉 toSafeUser 时前端无需改动。
+ *
+ * 三个选人器（新建会话/任务/日程）拿的都是这个表示，department 就是给它们消歧用的。
+ * 内容面的 toPublicUser 刻意不含 department：目前没有任何内容渲染点用得上它，
+ * 加上就是给 8 个接口各塞一个没人读的字段。
  */
 export function toAccountUser(u: DbUser): AccountUser {
   return {
@@ -73,6 +86,8 @@ export function toAccountUser(u: DbUser): AccountUser {
     displayName: u.display_name,
     role: u.role,
     avatar: u.avatar,
+    // 空串归一成 null，让前端只需判一种「未填」
+    department: u.department || null,
     deletedAt: u.deleted_at,
   };
 }

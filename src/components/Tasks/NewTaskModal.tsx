@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Modal, Form, Input, Select, DatePicker, message } from 'antd';
 import { apiFetch } from '../../api/http';
+import { userPickerLabel } from '../../utils/user';
 import { useTaskStore } from '../../stores/taskStore';
 
 const { TextArea } = Input;
@@ -9,6 +10,8 @@ interface UserOption {
   id: string;
   username: string;
   displayName: string;
+  /** 部门，null = 未填。用于同名消歧，见 userPickerLabel */
+  department?: string | null;
 }
 
 interface Props {
@@ -85,7 +88,7 @@ export function NewTaskModal({ open, onClose }: Props) {
           <Select
             mode="multiple"
             placeholder="选择负责人"
-            options={users.map((u) => ({ label: u.displayName, value: u.id }))}
+            options={users.map((u) => ({ label: userPickerLabel(u), value: u.id }))}
           />
         </Form.Item>
       </Form>

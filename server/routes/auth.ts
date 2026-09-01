@@ -13,6 +13,17 @@ import { toAccountUser } from '../presenters.js';
 
 const router = Router();
 
+/**
+ * 取请求体里的字符串字段，trim 后返回；非字符串一律当作「没填」返回空串。
+ *
+ * 必须先判 typeof 再 trim，不能直接 `req.body.x.trim()`：
+ * Express 4 **不接管 async handler 的 reject**，`{ displayName: 123 }` 这样的请求体
+ * 会让 .trim() 抛 TypeError，然后这个请求**永久挂起**（连 500 都不会返回）。
+ */
+function trimmedField(v: unknown): string {
+  return typeof v === 'string' ? v.trim() : '';
+}
+
 // POST /api/auth/login
 router.post('/login', async (req, res) => {
   const { username, password } = req.body;
@@ -55,7 +66,15 @@ router.post('/register', authMiddleware, async (req, res) => {
     return res.status(403).json({ error: '仅管理员可创建用户' });
   }
 
-  const { username, password, displayName, role } = req.body;
+  // 用 trim 后的值：displayName 全是空格时必须当成没填。
+  // 否则库里躺着一个显示名为空的用户，而前端两处渲染是 `displayName || username`
+  // （ConversationList、AppLayout），于是登录用的用户名会被顶到界面上。
+  const username = trimmedField(req.body?.username);
+  const displayName = trimmedField(req.body?.displayName);
+  const department = trimmedField(req.body?.department);
+  // 口令**不 trim**：首尾空格是合法口令内容，trim 掉等于偷偷改了用户设的口令。
+  // 但仍要判 typeof —— 非字符串传进 bcrypt 会抛，然后请求永久挂起。
+  const password = typeof req.body?.password === 'string' ? req.body.password : '';
   if (!username || !password || !displayName) {
     return res.status(400).json({ error: '请填写完整信息' });
   }
@@ -81,8 +100,9 @@ router.post('/register', authMiddleware, async (req, res) => {
     username,
     password_hash: passwordHash,
     display_name: displayName,
-    role: role === 'admin' ? 'admin' : 'member',
+    role: req.body?.role === 'admin' ? 'admin' : 'member',
     avatar: null,
+    department: department || null,
     created_at: now,
     updated_at: now,
   });
@@ -131,14 +151,28 @@ router.patch('/users/:id', authMiddleware, async (req, res) => {
   const user = db.getUser(req.params.id);
   if (!user) return res.status(404).json({ error: '用户不存在' });
 
-  const { displayName, role, password } = req.body;
+  const { displayName, role, password } = req.body ?? {};
   const updates: any = {};
-  if (displayName !== undefined) updates.display_name = displayName;
+  if (displayName !== undefined) {
+    const trimmedName = trimmedField(displayName);
+    if (!trimmedName) return res.status(400).json({ error: '显示名不能为空' });
+    updates.display_name = trimmedName;
+  }
+  if (req.body?.department !== undefined) {
+    // 空串是合法输入，意思是「清空部门」；统一存成 null，前端只需判一种未填。
+    updates.department = trimmedField(req.body.department) || null;
+  }
   if (role !== undefined) {
     if (role !== 'admin' && role !== 'member') {
-      return res.status(400).json({ error: 'role \u5fc5\u987b\u662f admin \u6216 member' });
+      return res.status(400).json({ error: 'role 必须是 admin 或 member' });
     }
     updates.role = role;
+  }
+
+  // 口令/显示名/部门的校验都要在 DB 写之前完成，否则部分更新已经提交，
+  // 口令却因校验失败返回了 400，数据库处于半更新状态。
+  if (password !== undefined && (typeof password !== 'string' || password === '')) {
+    return res.status(400).json({ error: '密码必须是非空字符串' });
   }
 
   if (Object.keys(updates).length > 0) {
