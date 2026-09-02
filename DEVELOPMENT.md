@@ -25,7 +25,8 @@
 **前端**
 - React 18 + TypeScript
 - React Router (路由管理)
-- TDesign React (UI 组件库)
+- Ant Design v6 (UI 组件库)
+- zustand (状态管理)
 - Vite (构建工具)
 
 ### 目录结构
