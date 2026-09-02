@@ -3,7 +3,7 @@
 > 这份文档只做**汇总与对账**,不新增需求。每一条状态都是当天用 grep/读码核实过的,
 > 不是照抄旧文档。核实不了的地方明确标注「内容缺失」,没有猜。
 
-## 先说一个记录本身的问题:三套编号并存,其中一套的内容丢了
+## 先说一个记录本身的问题:三套编号并存(其中一套的内容已于 2026-09-01 找回)
 
 | 来源 | 编号体系 | 内容是否可查 |
 |---|---|---|
@@ -75,16 +75,23 @@ agent,重启已在流程内 —— 收益接近零,却新造一条泄露面。
 
 | PR | 内容 | 规模 | 依赖 |
 |---|---|---|---|
-| **①** | 抽 `server/model-registry.ts` 收敛散在 5 文件 **9 处** 的 `process.env.OPENAI_*`;在唯一入口做服务端强制校验;`/api/chat` 改收 `agentId`,**忽略客户端传的 `systemPrompt`** | ~250 行 | 无 |
+| **①** | **已扩范围(含 P0)**:抽 `server/model-registry.ts` 收敛散在 5 文件 **9 处** 的 `process.env.OPENAI_*`;`/api/chat` 改收 `agentId`,服务端接管 `model` / `permissionMode` / `cwd` / `systemPrompt`(即 v4 **#3**);子进程 `env` 白名单(v4 **#8**);权限确认改硬拒绝并清掉 `pendingPermissions` 死代码(v4 **#16**);`env`/`printenv` 入黑名单 | ~350 行 | 无 |
 | **②** | 助手预设进库 + Agent 管理 UI(填掉 `SettingsPage.tsx:15` 的 `Empty`),删掉 `src/config/agents.ts` | ~450 行 | ① |
 | **③′** | `.env` 供应商槽位(`deepseek-chat@DEEPSEEK` + `PROVIDER_*`),多厂商并存,仍需重启 | ~80 行 | ① |
 
-### ① 附带修掉的三个独立问题
+### ① 附带修掉的问题(2026-09-01 扩范围后)
+
+**扩范围的理由**:v4 的 #3 改的就是 PR ① 要动的那一段参数解析(`index.ts:271`)。
+#3 未做正是 P0 提权链的第一环,分开做等于改两遍还会冲突。见第三节。
 
 - **`member_models` / `member_agents` 两道权限目前是纯装饰。** `server/index.ts:272` 直接取 body 的
   `model` 和 `systemPrompt`,无任何服务端校验(`index.ts:399` 把客户端传来的 `systemPrompt` 原样
   当 system message)。任何登录用户一条 curl 就能用任意模型、注入任意 system prompt。
-- **`/api/models` 没有 `authMiddleware`** —— 未登录也能列举模型清单。
+- ~~**`/api/models` 没有 `authMiddleware`** —— 未登录也能列举模型清单。~~
+  ⚠️ **这条是我写错的,2026-09-01 更正**:`index.ts:44` 有全局 `app.use("/api", ...)` 网关,
+  `PUBLIC_API_PATHS`(`:38`)只放行 `/health` `/version` `/auth/login` `/auth/refresh`。
+  `/models` 不在其中,**认证是生效的**。我当初只看了 `app.get("/api/models", ...)` 这一行
+  没挂中间件就下了结论 —— 教训:Express 的认证可能在上游 `app.use` 里,不能只看路由那一行。
 - backlog `#5`:`conversations.ts:213` 与 `papers.ts:149` 忽略用户的模型选择,硬用 env 默认值。
 
 ### 线上配置形状(2026-09-01 Owner 提供,据此判定 ① 行为中性)
@@ -109,21 +116,90 @@ agent,重启已在流程内 —— 收益接近零,却新造一条泄露面。
 
 ---
 
-## 三、B 组:`#N` 编号(内容缺失,**不具备可执行性**)
+## 三、B 组:`#N` / `F1-F6` / `P2-N` 编号 —— **已找回并逐条核实**
 
-| 批次 | 编号 | 内容 |
+> **2026-09-01 更新**:Owner 提供了 v4 原文,已转录归档为 `docs/fix-plan-v4.md`,
+> 并逐条核实到代码。这一节此前写的「内容缺失、不具备可执行性」**已作废**。
+
+### 结论:第 0 批与第 1 批全绿,第 2/3/4 批约 19 项未做
+
+| 批次 | 已完成 | 未完成 | 已否决 |
+|---|---|---|---|
+| 第 0 批 | A1 A2a A3 A4 A5 A6a-c A7 B4 | —— | A2b |
+| 第 1 批 | #1 #2a-e #12a #12b #18 | —— | —— |
+| 第 2 批 | —— | **#3 #4 #5 #6 #7a #8 #9a** | #9b |
+| 第 3 批 | #10 #11 #13 #17(第 0 批的重复引用) | **#15b #16** | —— |
+| 第 4 批 | —— | **F1-F6 P2-1 P2-2 P2-4 P2-5 P2-6**(P2-3 部分) | —— |
+
+### 🔴 P0:四条未做项串成 member → admin 提权链
+
+v4 把 #3 / #8 / #16 分散在两个批次里,**没有指出它们合起来是一条完整路径**:
+
+| 环 | 位置 | 未做项 |
 |---|---|---|
-| 第 2 批其余 | `#3` `#6` `#7` `#8` | ❌ 未知(v4 文档不在仓库) |
-| 第 2 批 | `#4` AGENT_PROMPTS 键名对齐 | ⚠️ **前提已过期** —— 全仓 grep 无 `AGENT_PROMPTS`,该符号不存在 |
-| 第 2 批 | `#5` 模型解析 | ✅ 将由 **A 组 PR ①** 覆盖 |
-| 第 3 批 | `#10` `#11` `#13` `#15b` `#16` `#17` | ❌ 未知 |
-| 第 4 批 | `F1`–`F6`、`P2-1`..`P2-6` | ❌ 未知 |
+| ① `permissionMode` 由客户端传入 | `index.ts:271` → `:383` | #3 |
+| ② `bypassPermissions` 时全部工具自动放行 | `index.ts:408` | #16 |
+| ③ `execAsync` 无 `env` 白名单,子进程继承全部环境变量 | `coding/index.ts:290` | #8 |
+| ④ `env` / `printenv` 不在黑名单里 | `coding/index.ts:31` | 新发现 |
 
-**处理建议**:这 20+ 个编号目前是空壳。要么找回 v4 原文补进仓库,要么正式作废、以 Phase 文档和
-实际 code review 为准。**保留一份「只有号码没有内容」的清单没有意义**,它会让人误以为还有 20 项
-已知工作待做。
+任何**已登录的普通成员**发 `POST /api/chat` 带
+`{"permissionMode":"bypassPermissions","cwd":"/","message":"运行 printenv"}`,
+即可读到 `JWT_SECRET`(自签 admin token)和 `OPENAI_API_KEY`。
 
----
+**不是未认证可达** —— `index.ts:44` 的全局网关要求 JWT,门槛是「任意有效账号」。
+
+> 📌 **裁决(2026-09-01)**:#3 + #8 + #16 **并入 PR ①** 一起发。
+> 理由:#3 改的就是 PR ① 要动的那一段参数解析(`index.ts:271`),分开做等于改两遍还会冲突。
+
+### 🟠 P1:A3 与 #7a 的组合造成净损失
+
+v4 的 A3 要求**删掉** #7b(改 role 时吊销 token),因为原实现会让降权用户**永久无法登录**。
+这一条正确地做了。但 A3 明确说「保留 #7a(refresh 查 DB)作为兜底」—— **#7a 没做**。
+
+`auth.ts:122-129` 的 refresh 直接用旧 payload 重签 role,从不查库。结果:
+**被降权的 admin 只要在 token 过期前调一次 refresh,就能无限续期 admin 身份。**
+
+修法很小(refresh 里 `db.getUser(payload.userId)` 取当前 role 再签),建议紧随 PR ① 之后。
+
+### 其余未做项(按性质分组)
+
+**安全加固** —— #4 `resolveWithin` 无 realpath,符号链接可逃逸(且现有
+`rel.startsWith('..')` 会误拒 `..foo` 这类合法文件);#5 todo skill 无 mutation 归属校验;
+#6 `ws.ts:9` 是 `origin: '*'` 且不查 token 黑名单;#15b cancel 端点不校验会话归属,
+任何登录用户可中断他人会话。
+
+**前端健壮性** —— F1 `/api/chat` 的 fetch 不查 `response.ok`(4xx 的错误体被当 SSE 解析,
+静默无输出);F4 六个 store 都有 `apiFetch` 后直接 `.json()` 的路径;F3 无 JWT `exp` 检查;
+F5 收到 `permission_request` 静默丢弃。
+
+**F6 需要更正一处旧记录** —— `chatStore.ts:253` 的 `state.streamingContent` 是 v4 标记的
+stale closure bug(应为 `get().streamingContent`)。**这一行曾被当作 9.2「中断后落 (已停止)」**
+**的正面证据写进核实记录**;它确实是中断分支,但本身有 bug,读旧快照很可能落空字符串。
+
+**凭据卫生** —— F2 登录页预填 `admin123` 且明文提示;P2-4 `db.ts:355` 无条件把管理员密码
+打进日志、无生产守卫。⚠️ 而 `docker-compose.yml:21-22` 的注释**承诺**了
+「生产缺 `DEFAULT_ADMIN_PASSWORD` 会拒绝启动(见 db.ts)」—— **`db.ts` 里没有这个守卫**,
+注释在骗人。
+
+**死代码与类型** —— P2-1 `/api/check-login`(前端零消费)、P2-2 `clearAllData`(零调用)、
+P2-5 无 `server/types/express.d.ts`(51 处 `req as any`)、P2-6 `agent.ts:43` `messages: any[]`。
+P2-3 `cleanupExpiredBlacklist` 已在登录/注销路径被顺手调用,只缺启动调用与定时器,属 🟡。
+
+### v4 有三条不能照抄
+
+| 条目 | 问题 | 以什么为准 |
+|---|---|---|
+| A2b | 要求把 `cancelFlags.delete()` 放进循环开头 —— 会在 `has()` 检查前抹掉标记,**取消永远失效** | 代码(放循环外,`agent.ts:79-82` 有注释) |
+| #12b | 用 boolean `completed` —— 超时/中断也会让它为 false,**同时报两条矛盾错误** | 代码(4 态 `stopReason`,`agent.ts:91`) |
+| #9b | 要求 DELETE 用户创建的内容,备注还提议 UPDATE 改判归属 —— **后者会永久丢失原始归属**,`db.ts:256-262` 记录了这个后果 | 代码(软删除 + `countUserReferences`) |
+
+**这三条应从待办中永久移除**,不是「还没做」。
+
+### #4 之外还有一条 v4 写对了、现有代码写窄了
+
+现有 `resolveWithin` 的越界判断是 `rel.startsWith('..')`,v4 给的是
+`rel === '..' || rel.startsWith('..' + path.sep) || path.isAbsolute(rel)`。
+前者会误拒名为 `..foo` 的合法文件。修 #4 时一并按 v4 的三段式写。
 
 ## 四、C 组:Phase 8–12 未完成项(内容完整,可执行)
 
@@ -169,13 +245,16 @@ agent,重启已在流程内 —— 收益接近零,却新造一条泄露面。
 
 ## 六、建议顺序
 
-1. **零成本**:线上 `.env` 填 `OPENAI_MODELS`(不用 PR,立刻见效)
-2. **提交 `docs/optimization-plan.md`**(831 行未入版本控制,风险不对称)
-3. **A 组 PR ①** —— 同时关掉两个越权,且已确认行为中性
-4. **A 组 PR ②** —— 真正解决「硬编码」这个原始诉求
-5. **裁决 B 组**:找回 v4 原文,或正式作废这 20+ 个空壳编号
-6. **裁决 12.4**:自动路由还要不要
-7. A 组 ③′ / C 组其余按需
+1. ~~提交 `docs/optimization-plan.md`~~ ✅ 已完成(PR #7)
+2. ~~找回或作废 B 组编号~~ ✅ 已完成 —— v4 原文已归档为 `docs/fix-plan-v4.md` 并逐条核实
+3. **零成本**:线上 `.env` 填 `OPENAI_MODELS`(不用 PR,立刻见效)
+4. 🔴 **A 组 PR ①(已扩范围,含 v4 #3 + #8 + #16)** —— 断掉 P0 提权链,同时收敛模型配置
+5. 🟠 **v4 #7a** —— refresh 查 DB 取当前 role。修法很小,但不修就等于降权无效
+6. **A 组 PR ②** —— 真正解决「硬编码」这个原始诉求
+7. **v4 剩余安全项**:#4(realpath)、#6(WS origin + 黑名单)、#15b(cancel 归属)、#5(skill 归属)
+8. **v4 前端与清理项**:F1-F6、P2-1/2/4/5/6(可合成 1-2 个 PR)
+9. **裁决 12.4**:自动路由还要不要
+10. A 组 ③′ / C 组其余按需
 
 ## 七、每个 PR 的验证门槛(本仓已建立的做法,勿降级)
 
